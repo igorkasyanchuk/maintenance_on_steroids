@@ -113,6 +113,11 @@ RSpec.describe MaintenanceOnSteroids::Run, type: :model do
       run.update!(started_at: 125.seconds.ago)
       expect(run.formatted_duration).to match(/\d+m \d+s/)
     end
+
+    it "formats hours and minutes" do
+      run.update!(started_at: 2.hours.ago - 5.minutes)
+      expect(run.formatted_duration).to match(/\d+h \d+m/)
+    end
   end
 
   describe "#pause!" do
@@ -131,15 +136,127 @@ RSpec.describe MaintenanceOnSteroids::Run, type: :model do
 
   describe "#cancel!" do
     it "transitions enqueued to cancelled" do
-      run.cancel!
+      expect(run.cancel!).to be true
       expect(run.reload.status).to eq("cancelled")
       expect(run.completed_at).to be_present
     end
 
     it "transitions running to cancelling" do
       run.update!(status: "running")
-      run.cancel!
+      expect(run.cancel!).to be true
       expect(run.reload.status).to eq("cancelling")
+    end
+
+    it "transitions pausing to cancelling" do
+      run.update!(status: "pausing")
+      expect(run.cancel!).to be true
+      expect(run.reload.status).to eq("cancelling")
+    end
+
+    it "transitions paused to cancelled" do
+      run.update!(status: "paused")
+      expect(run.cancel!).to be true
+      expect(run.reload.status).to eq("cancelled")
+    end
+
+    it "returns false for terminal statuses" do
+      run.update!(status: "completed")
+      expect(run.cancel!).to be false
+      expect(run.reload.status).to eq("completed")
+    end
+  end
+
+  describe "#pause!" do
+    it "returns true when the transition happened" do
+      run.update!(status: "running")
+      expect(run.pause!).to be true
+    end
+
+    it "returns false when not running" do
+      run.update!(status: "paused")
+      expect(run.pause!).to be false
+    end
+  end
+
+  describe "#resume!" do
+    it "re-enqueues a paused run" do
+      run.update!(status: "paused")
+      expect(run.resume!).to be true
+      expect(run.reload.status).to eq("enqueued")
+      expect(run.active_job_id).to be_present
+    end
+
+    it "refuses a second resume (compare-and-set)" do
+      run.update!(status: "paused")
+      stale_copy = MaintenanceOnSteroids::Run.find(run.id)
+
+      expect(run.resume!).to be true
+      expect {
+        expect(stale_copy.resume!).to be false
+      }.not_to have_enqueued_job(MaintenanceOnSteroids::RunJob)
+
+      expect(run.reload.status).to eq("enqueued")
+    end
+
+    it "returns false when not paused" do
+      run.update!(status: "running")
+      expect(run.resume!).to be false
+    end
+  end
+
+  describe "#enqueue!" do
+    it "applies the task's configured queue" do
+      run.update!(task_class: "TaskWithQueue")
+      run.enqueue!
+      job = ActiveJob::Base.queue_adapter.enqueued_jobs.last
+      expect(job[:queue]).to eq("exports")
+    end
+
+    it "applies the task's configured priority" do
+      priority_task = Class.new(MaintenanceOnSteroids::Task) do
+        job do
+          priority 7
+        end
+
+        def call; end
+      end
+      stub_const("PriorityTask", priority_task)
+      run.update!(task_class: "PriorityTask")
+
+      run.enqueue!
+      job = ActiveJob::Base.queue_adapter.enqueued_jobs.last
+      expect(job[:priority]).to eq(7)
+    end
+  end
+
+  describe ".reap_stale!" do
+    it "marks stale in-flight runs as errored" do
+      stale = MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "running")
+      stale.update_column(:updated_at, 2.hours.ago)
+
+      expect(MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes)).to eq(1)
+
+      stale.reload
+      expect(stale.status).to eq("errored")
+      expect(stale.error_message).to include("stale")
+      expect(stale.completed_at).to be_present
+    end
+
+    it "leaves fresh running runs alone" do
+      fresh = MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "running")
+      expect(MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes)).to eq(0)
+      expect(fresh.reload.status).to eq("running")
+    end
+
+    it "does not touch enqueued or paused runs" do
+      enqueued = MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "enqueued")
+      paused = MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "paused")
+      MaintenanceOnSteroids::Run.where(id: [enqueued.id, paused.id]).update_all(updated_at: 2.hours.ago)
+
+      MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes)
+
+      expect(enqueued.reload.status).to eq("enqueued")
+      expect(paused.reload.status).to eq("paused")
     end
   end
 

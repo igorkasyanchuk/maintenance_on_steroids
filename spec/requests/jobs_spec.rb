@@ -33,6 +33,26 @@ RSpec.describe "Jobs", type: :request do
     end
   end
 
+  describe "GET /maintenance/jobs/:id for unknown or non-task constants" do
+    it "404s for unknown class names" do
+      expect {
+        get "/maintenance/jobs/TotallyUnknownTask"
+      }.to raise_error(ActiveRecord::RecordNotFound)
+    end
+
+    it "404s for real constants that are not maintenance tasks" do
+      expect {
+        get "/maintenance/jobs/User"
+      }.to raise_error(ActiveRecord::RecordNotFound)
+    end
+
+    it "404s on source for real constants that are not maintenance tasks" do
+      expect {
+        get "/maintenance/jobs/File/source"
+      }.to raise_error(ActiveRecord::RecordNotFound)
+    end
+  end
+
   describe "GET /maintenance/jobs/:id/source" do
     it "returns success" do
       get "/maintenance/jobs/UpdateUsersTask/source"

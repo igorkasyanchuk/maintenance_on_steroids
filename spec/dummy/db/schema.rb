@@ -52,4 +52,11 @@ ActiveRecord::Schema[7.1].define(version: 0) do
     t.json    :metadata,      default: {}
     t.timestamps null: false
   end
+
+  add_index :maintenance_on_steroids_runs, :task_class
+  add_index :maintenance_on_steroids_runs, :status
+  add_index :maintenance_on_steroids_runs, :created_at
+  add_index :maintenance_on_steroids_runs, [:task_class, :status]
+  add_index :maintenance_on_steroids_runs, [:task_class, :created_at]
+  add_index :maintenance_on_steroids_artifacts, [:run_id, :name, :kind], unique: true, name: "idx_mos_artifacts_run_name_kind"
 end

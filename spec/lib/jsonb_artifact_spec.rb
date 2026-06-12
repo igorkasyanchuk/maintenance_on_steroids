@@ -43,4 +43,41 @@ RSpec.describe MaintenanceOnSteroids::JsonbArtifact do
   it "exposes the underlying record" do
     expect(subject.record).to eq(artifact_record)
   end
+
+  describe "hash-copy operations (detached copies)" do
+    it "supports merge" do
+      merged = subject.merge("other" => 1)
+      expect(merged["existing_key"]).to eq("existing_value")
+      expect(merged["other"]).to eq(1)
+    end
+
+    it "supports dup" do
+      copy = subject.dup
+      copy["only_in_copy"] = true
+      expect(copy["only_in_copy"]).to be true
+      expect(subject.key?("only_in_copy")).to be false
+    end
+
+    it "supports except" do
+      remaining = subject.except("existing_key")
+      expect(remaining.key?("existing_key")).to be false
+    end
+
+    it "can be constructed from a plain hash" do
+      detached = described_class.new("a" => 1)
+      expect(detached[:a]).to eq(1)
+      expect(detached.record).to be_nil
+    end
+
+    it "raises a clear error when save! is called on a detached copy" do
+      expect { subject.dup.save! }.to raise_error(/detached JsonbArtifact/)
+    end
+
+    it "still saves the original after copies were made" do
+      subject.merge("x" => 1)
+      subject["persisted"] = true
+      subject.save!
+      expect(artifact_record.reload.data_jsonb["persisted"]).to be true
+    end
+  end
 end

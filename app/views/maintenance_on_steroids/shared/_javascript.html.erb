@@ -12,5 +12,5 @@
     var icon = document.getElementById('theme-icon');
     if (icon) icon.textContent = theme === 'dark' ? '\u2600' : '\u263E';
   }
-  updateThemeIcon();
+  document.addEventListener('DOMContentLoaded', updateThemeIcon);
 </script>

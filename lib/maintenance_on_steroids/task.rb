@@ -1,13 +1,3 @@
-require_relative "form_dsl"
-require_relative "artifact_dsl"
-require_relative "job_dsl"
-require_relative "about_dsl"
-require_relative "callbacks_dsl"
-require_relative "artifacts_proxy"
-require_relative "jsonb_artifact"
-require_relative "params_proxy"
-require_relative "job_registry"
-
 module MaintenanceOnSteroids
   class Task
     include FormDsl

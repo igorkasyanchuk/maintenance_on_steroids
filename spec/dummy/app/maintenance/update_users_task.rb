@@ -12,6 +12,10 @@ class UpdateUsersTask < MaintenanceOnSteroids::Task
 
   artifact :result, type: :jsonb, default: {}
 
+  # Canonical artifact pattern: accumulate in memory per record, persist once
+  # when the run finishes (saving the whole JSONB document per record is O(N^2)).
+  after_complete :save_result
+
   def collection
     User.where(name: params[:name]).order(id: :desc)
   end
@@ -19,6 +23,11 @@ class UpdateUsersTask < MaintenanceOnSteroids::Task
   def process(user)
     user.update!(age: params[:age])
     artifacts[:result][user.id.to_s] = { user_id: user.id, age: user.age }
+  end
+
+  private
+
+  def save_result
     artifacts[:result].save!
   end
 end

@@ -1,6 +1,5 @@
 require_relative "maintenance_on_steroids/version"
 require_relative "maintenance_on_steroids/engine"
-require_relative "maintenance_on_steroids/configuration"
 require_relative "maintenance_on_steroids/job_registry"
 require_relative "maintenance_on_steroids/form_dsl"
 require_relative "maintenance_on_steroids/artifact_dsl"
@@ -14,8 +13,13 @@ require_relative "maintenance_on_steroids/artifacts_proxy"
 require_relative "maintenance_on_steroids/task"
 
 module MaintenanceOnSteroids
+  # Base controller class for the engine's controllers (resolved at load time).
+  # Set this in an initializer, before the engine's controllers are loaded.
   mattr_accessor :parent_controller, default: "ActionController::Base"
-  mattr_accessor :tasks_module, default: nil
+
+  # Maximum allowed size (in bytes) for file inputs uploaded when starting a run.
+  # Uploads are read into memory and stored in the artifacts table.
+  mattr_accessor :max_upload_size, default: 50 * 1024 * 1024
 
   # Proc to resolve the current user who triggered the run.
   # Must return an object responding to #id (and optionally #email).
@@ -55,7 +59,7 @@ module MaintenanceOnSteroids
   mattr_accessor :verify_access_proc, default: nil
 
   # General-purpose authentication hook (instance_exec'd in controller context).
-  # Runs after HTTP Basic and verify_access_proc. Use for custom auth flows.
+  # Runs after HTTP Basic and before verify_access_proc. Use for custom auth flows.
   # Example:
   #   MaintenanceOnSteroids.authentication = -> {
   #     authenticate_user!

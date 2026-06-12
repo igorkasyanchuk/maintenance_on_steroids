@@ -3,19 +3,39 @@ module MaintenanceOnSteroids
     has_many :artifacts, dependent: :destroy
 
     STATUSES = %w[enqueued running pausing paused cancelling cancelled completed errored].freeze
+    ACTIVE_STATUSES = %w[enqueued running pausing paused].freeze
+    # Statuses that mean "a worker currently holds this run" -- candidates
+    # for staleness reaping when the worker died without updating the row.
+    STALE_CANDIDATE_STATUSES = %w[running pausing cancelling].freeze
 
     validates :task_class, presence: true
     validates :status, inclusion: { in: STATUSES }
 
     scope :recent, -> { order(created_at: :desc) }
-    scope :active, -> { where(status: %w[enqueued running pausing paused]) }
+    scope :active, -> { where(status: ACTIVE_STATUSES) }
 
     STATUSES.each do |s|
       define_method(:"#{s}?") { status == s }
     end
 
+    # Transitions runs stuck in an in-flight status to "errored" when the row
+    # hasn't been touched for `threshold`. RunJob updates the row at least
+    # once per processed record, so updated_at acts as a heartbeat. Call this
+    # periodically (cron, recurring job) to recover from worker crashes.
+    # Returns the number of reaped runs.
+    def self.reap_stale!(threshold: 30.minutes)
+      where(status: STALE_CANDIDATE_STATUSES)
+        .where(updated_at: ...threshold.ago)
+        .update_all(
+          status: "errored",
+          error_message: "Run marked as stale: no progress for over #{threshold.inspect}. The worker likely crashed.",
+          completed_at: Time.current,
+          updated_at: Time.current
+        )
+    end
+
     def active?
-      %w[enqueued running pausing paused].include?(status)
+      ACTIVE_STATUSES.include?(status)
     end
 
     def stoppable?
@@ -31,7 +51,7 @@ module MaintenanceOnSteroids
     end
 
     def cancellable?
-      %w[enqueued running pausing paused].include?(status)
+      ACTIVE_STATUSES.include?(status)
     end
 
     def progress_percentage
@@ -65,25 +85,47 @@ module MaintenanceOnSteroids
       job_config = task_instance.class.job_config
       job = RunJob.new(id)
       job.queue_name = job_config.queue_name if job_config.queue_name
+      job.priority = job_config.priority if job_config.priority
       job.enqueue
       update!(active_job_id: job.job_id)
     end
 
+    # Returns true when the transition was performed, false otherwise.
     def pause!
-      update!(status: "pausing") if running?
+      return false unless running?
+
+      update!(status: "pausing")
+      true
     end
 
+    # Compare-and-set so two concurrent resumes can't both enqueue a job
+    # for the same run. Returns true when this call won the transition.
     def resume!
-      return unless paused?
-      update!(status: "enqueued")
+      claimed = self.class.where(id: id, status: "paused").update_all(
+        status: "enqueued",
+        active_job_id: nil,
+        updated_at: Time.current
+      ) == 1
+      return false unless claimed
+
+      reload
       enqueue!
+      true
     end
 
+    # Returns true when the transition was performed, false otherwise.
+    # NOTE: an already-enqueued job cannot be portably removed from the queue
+    # via Active Job. RunJob#perform guards on terminal statuses, so a job
+    # that still fires for a cancelled run is a no-op.
     def cancel!
       if enqueued? || paused?
         update!(status: "cancelled", completed_at: Time.current)
-      elsif running?
+        true
+      elsif running? || pausing?
         update!(status: "cancelling")
+        true
+      else
+        false
       end
     end
 

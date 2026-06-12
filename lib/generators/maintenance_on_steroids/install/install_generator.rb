@@ -35,6 +35,11 @@ module MaintenanceOnSteroids
         say "  2. Create tasks in app/maintenance/"
         say "  3. Visit /maintenance in your browser"
         say ""
+        say "WARNING: the dashboard is mounted WITHOUT authentication by default.", :yellow
+        say "Configure auth in config/initializers/maintenance_on_steroids.rb", :yellow
+        say "(http_basic_authentication_enabled, authentication, verify_access_proc)", :yellow
+        say "before deploying to production.", :yellow
+        say ""
       end
 
       private

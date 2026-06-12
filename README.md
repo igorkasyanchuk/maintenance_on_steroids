@@ -319,12 +319,13 @@ end
 
 ### Job Configuration
 
-Set a custom queue:
+Set a custom queue and/or priority:
 
 ```ruby
 class HeavyExport < MaintenanceOnSteroids::Task
   job do
     queue "exports"
+    priority 10
   end
 
   def call
@@ -385,7 +386,7 @@ end
 | Option | Default | Description |
 |--------|---------|-------------|
 | `parent_controller` | `"ActionController::Base"` | Base controller class for the engine |
-| `tasks_module` | `nil` | Module where task classes are defined |
+| `max_upload_size` | `50.megabytes` | Maximum size (bytes) for file inputs uploaded when starting a run |
 | `http_basic_authentication_enabled` | `false` | Enable HTTP Basic auth |
 | `http_basic_authentication_user_name` | `"admin"` | HTTP Basic username |
 | `http_basic_authentication_password` | `"secret"` | HTTP Basic password |
@@ -455,6 +456,21 @@ This gem uses Rails 8.1's `ActiveJob::Continuable` for safe background processin
 5. In both cases, the query uses `WHERE id > cursor` to skip already-processed records
 
 **Records are never processed twice.** The gem includes tests that verify this behavior across Sidekiq restarts, pause/resume cycles, and multiple interruptions.
+
+> **Note:** cursor-based resumption relies on monotonically increasing primary keys. Collections with UUID/string primary keys can skip or repeat records on resume -- the job logs a warning when it detects one.
+
+## Operations
+
+### Recovering from worker crashes
+
+If a worker process dies hard (OOM kill, `kill -9`, node failure), its run can be left in `running` forever. `Run.reap_stale!` transitions in-flight runs whose row hasn't been touched recently to `errored` (the job updates the row at least once per processed record, so `updated_at` acts as a heartbeat):
+
+```ruby
+# Run periodically (cron, recurring job, e.g. solid_queue recurring task):
+MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes)
+```
+
+Pick a threshold comfortably larger than the time your slowest task needs to process a single record. `enqueued` and `paused` runs are never reaped.
 
 ## Development
 

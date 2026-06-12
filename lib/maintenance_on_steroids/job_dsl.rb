@@ -3,7 +3,7 @@ module MaintenanceOnSteroids
     extend ActiveSupport::Concern
 
     class JobConfig
-      attr_reader :queue_name, :priority
+      attr_reader :queue_name
 
       def initialize
         @queue_name = nil
@@ -14,7 +14,10 @@ module MaintenanceOnSteroids
         @queue_name = name.to_s
       end
 
-      def priority(value)
+      # Acts as both DSL setter (priority 10) and reader (config.priority).
+      def priority(value = :__unset__)
+        return @priority if value == :__unset__
+
         @priority = value
       end
     end

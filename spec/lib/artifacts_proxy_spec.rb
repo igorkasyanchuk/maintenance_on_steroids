@@ -12,8 +12,19 @@ RSpec.describe MaintenanceOnSteroids::ArtifactsProxy do
   subject { described_class.new(run, definitions) }
 
   describe "#[]" do
-    it "creates artifact record on first access" do
-      expect { subject[:result] }.to change(MaintenanceOnSteroids::Artifact, :count).by(1)
+    it "does not persist an artifact record on read" do
+      expect { subject[:result] }.not_to change(MaintenanceOnSteroids::Artifact, :count)
+    end
+
+    it "persists the lazily-built record on save!" do
+      subject[:result]["foo"] = "bar"
+      expect { subject.save!(:result) }.to change(MaintenanceOnSteroids::Artifact, :count).by(1)
+      expect(run.artifacts.find_by(name: "result").data_jsonb["foo"]).to eq("bar")
+    end
+
+    it "reads back an already-persisted record" do
+      run.artifacts.create!(name: "result", kind: "output", artifact_type: "jsonb", data_jsonb: { "x" => 1 })
+      expect(subject[:result]["x"]).to eq(1)
     end
 
     it "returns a JsonbArtifact for jsonb type" do
@@ -46,6 +57,24 @@ RSpec.describe MaintenanceOnSteroids::ArtifactsProxy do
 
       artifact = run.artifacts.find_by(name: "result")
       expect(artifact.data_jsonb["foo"]).to eq("bar")
+    end
+  end
+
+  describe "#save_all!" do
+    it "persists all modified cached artifacts" do
+      jsonb_defn = MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:result, type: :jsonb, default: {})
+      text_defn = MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:summary, type: :text)
+      proxy = described_class.new(run, [jsonb_defn, text_defn])
+
+      proxy[:result]["foo"] = "bar"
+      proxy[:summary] << "hello"
+
+      proxy.save_all!
+
+      jsonb_artifact = run.artifacts.find_by(name: "result")
+      text_artifact = run.artifacts.find_by(name: "summary")
+      expect(jsonb_artifact.reload.data_jsonb["foo"]).to eq("bar")
+      expect(text_artifact.reload.data_text).to eq("hello")
     end
   end
 

@@ -18,6 +18,12 @@ RSpec.describe "Runs", type: :request do
       expect(response).to have_http_status(:success)
       expect(response.body).to include("no input parameters")
     end
+
+    it "404s for task names that are not registered tasks" do
+      expect {
+        get "/maintenance/jobs/User/runs/new"
+      }.to raise_error(ActiveRecord::RecordNotFound)
+    end
   end
 
   describe "POST /maintenance/jobs/:job_id/runs" do
@@ -39,6 +45,45 @@ RSpec.describe "Runs", type: :request do
       expect {
         post "/maintenance/jobs/SimpleCallableTask/runs"
       }.to change(MaintenanceOnSteroids::Run, :count).by(1)
+    end
+
+    it "rejects submissions missing required params with 422" do
+      expect {
+        post "/maintenance/jobs/UpdateUsersTask/runs", params: {
+          task_params: { name: "", age: "" }
+        }
+      }.not_to change(MaintenanceOnSteroids::Run, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).to include("Missing required parameters")
+    end
+
+    it "renders new with 422 when the run cannot be saved" do
+      allow_any_instance_of(MaintenanceOnSteroids::Run).to receive(:save).and_return(false)
+
+      post "/maintenance/jobs/SimpleCallableTask/runs"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it "marks the run errored when enqueueing fails" do
+      allow_any_instance_of(MaintenanceOnSteroids::Run).to receive(:enqueue!).and_raise("queue down")
+
+      post "/maintenance/jobs/UpdateUsersTask/runs", params: {
+        task_params: { name: "Alice", age: "30" }
+      }
+
+      run = MaintenanceOnSteroids::Run.last
+      expect(run.status).to eq("errored")
+      expect(run.error_message).to include("queue down")
+      expect(response).to redirect_to("/maintenance/runs/#{run.id}")
+      expect(flash[:alert]).to include("could not be enqueued")
+    end
+
+    it "404s for task names that are not registered tasks" do
+      expect {
+        post "/maintenance/jobs/NotARealTask/runs"
+      }.to raise_error(ActiveRecord::RecordNotFound)
     end
   end
 
@@ -73,6 +118,13 @@ RSpec.describe "Runs", type: :request do
       get "/maintenance/runs/#{run.id}"
       expect(response.body).to include("setInterval")
     end
+
+    it "renders runs whose task class no longer exists" do
+      orphan = MaintenanceOnSteroids::Run.create!(task_class: "DeletedOldTask", status: "completed")
+      get "/maintenance/runs/#{orphan.id}"
+      expect(response).to have_http_status(:success)
+      expect(response.body).to include("DeletedOldTask")
+    end
   end
 
   describe "POST /maintenance/runs/:id/pause" do
@@ -81,6 +133,14 @@ RSpec.describe "Runs", type: :request do
       post "/maintenance/runs/#{run.id}/pause"
       expect(run.reload.status).to eq("pausing")
       expect(response).to redirect_to("/maintenance/runs/#{run.id}")
+      expect(flash[:notice]).to be_present
+    end
+
+    it "shows an alert when the run cannot be paused" do
+      run = MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "completed")
+      post "/maintenance/runs/#{run.id}/pause"
+      expect(run.reload.status).to eq("completed")
+      expect(flash[:alert]).to include("cannot be paused")
     end
   end
 
@@ -90,6 +150,13 @@ RSpec.describe "Runs", type: :request do
       post "/maintenance/runs/#{run.id}/resume"
       expect(run.reload.status).to eq("enqueued")
       expect(response).to redirect_to("/maintenance/runs/#{run.id}")
+    end
+
+    it "shows an alert when the run is not paused" do
+      run = MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "running")
+      post "/maintenance/runs/#{run.id}/resume"
+      expect(run.reload.status).to eq("running")
+      expect(flash[:alert]).to include("cannot be resumed")
     end
   end
 

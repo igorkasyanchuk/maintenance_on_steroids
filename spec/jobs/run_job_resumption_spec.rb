@@ -1,6 +1,6 @@
 require "rails_helper"
 
-RSpec.describe "RunJob collection resumption", type: :model do
+RSpec.describe "RunJob collection resumption", type: :job do
   # A task that records every processed user ID so we can verify no duplicates.
   let(:processed_ids) { [] }
 

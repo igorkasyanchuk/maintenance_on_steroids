@@ -1,5 +1,5 @@
 module MaintenanceOnSteroids
-  class ApplicationController < ActionController::Base
+  class ApplicationController < MaintenanceOnSteroids.parent_controller.constantize
     protect_from_forgery with: :exception
 
     layout "maintenance_on_steroids/application"
@@ -20,15 +20,6 @@ module MaintenanceOnSteroids
       end
     end
 
-    # Step 3: Proc-based access check (if configured)
-    def verify_access
-      return unless MaintenanceOnSteroids.verify_access_proc
-
-      unless MaintenanceOnSteroids.verify_access_proc.call(self)
-        render plain: "Access denied", status: :forbidden
-      end
-    end
-
     # Step 2: General-purpose authentication hook (if configured)
     def run_authentication_hook
       return unless MaintenanceOnSteroids.authentication
@@ -36,8 +27,13 @@ module MaintenanceOnSteroids
       instance_exec(&MaintenanceOnSteroids.authentication)
     end
 
-    def set_task_class
-      @task_class = MaintenanceOnSteroids::JobRegistry.find(params[:job_id] || params[:id])
+    # Step 3: Proc-based access check (if configured)
+    def verify_access
+      return unless MaintenanceOnSteroids.verify_access_proc
+
+      unless MaintenanceOnSteroids.verify_access_proc.call(self)
+        render plain: "Access denied", status: :forbidden
+      end
     end
 
     # Resolve the current user in controller context where Devise/Warden methods are available.

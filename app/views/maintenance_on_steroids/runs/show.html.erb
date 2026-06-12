@@ -1,33 +1,29 @@
+<% task_title = @task_class_obj&.task_title || @run.task_title %>
 <div class="breadcrumb">
   <a href="<%= jobs_path %>">Tasks</a> &rsaquo;
-  <a href="<%= job_path(id: @run.task_class) %>"><%= @task_class_obj.task_title %></a> &rsaquo;
+  <% if @task_class_obj %>
+    <a href="<%= job_path(id: @run.task_class) %>"><%= task_title %></a> &rsaquo;
+  <% else %>
+    <span title="Task class no longer exists"><%= task_title %></span> &rsaquo;
+  <% end %>
   Run #<%= @run.id %>
 </div>
 
 <div class="page-header">
   <div>
     <h1>Run #<%= @run.id %></h1>
-    <p class="subtitle"><%= @task_class_obj.task_title %></p>
+    <p class="subtitle"><%= task_title %></p>
   </div>
   <div class="btn-group">
     <% if @run.pausable? %>
-      <form action="<%= pause_run_path(@run) %>" method="post" style="display: inline;">
-        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
-        <button type="submit" class="btn btn-warning btn-sm">Pause</button>
-      </form>
+      <%= button_to "Pause", pause_run_path(@run), class: "btn btn-warning btn-sm", form: { style: "display: inline;" } %>
     <% end %>
     <% if @run.resumable? %>
-      <form action="<%= resume_run_path(@run) %>" method="post" style="display: inline;">
-        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
-        <button type="submit" class="btn btn-success btn-sm">Resume</button>
-      </form>
+      <%= button_to "Resume", resume_run_path(@run), class: "btn btn-success btn-sm", form: { style: "display: inline;" } %>
     <% end %>
     <% if @run.cancellable? %>
-      <form action="<%= cancel_run_path(@run) %>" method="post" style="display: inline;"
-            onsubmit="return confirm('Are you sure you want to cancel this run?');">
-        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
-        <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
-      </form>
+      <%= button_to "Cancel", cancel_run_path(@run), class: "btn btn-danger btn-sm",
+            form: { style: "display: inline;", onsubmit: "return confirm('Are you sure you want to cancel this run?');" } %>
     <% end %>
   </div>
 </div>
@@ -156,14 +152,45 @@
 <script>
 (function() {
   var POLL_INTERVAL = 2000;
+  var MAX_CONSECUTIVE_FAILURES = 5;
   var statusUrl = "<%= status_run_path(@run) %>";
-  var initialStatus = "<%= @run.status %>";
   var reloadStatuses = ["completed", "errored", "cancelled", "paused"];
 
+  var timer = null;
+  var reloadTimer = null;
+  var consecutiveFailures = 0;
+  var abortController = new AbortController();
+
+  // Stop polling, pending reloads and in-flight fetches when leaving the
+  // page (Turbo navigation or regular unload) so stale responses can't
+  // touch a swapped DOM and intervals don't stack across navigations.
+  function teardown() {
+    if (timer !== null) { clearInterval(timer); timer = null; }
+    if (reloadTimer !== null) { clearTimeout(reloadTimer); reloadTimer = null; }
+    abortController.abort();
+    document.removeEventListener("turbo:before-visit", teardown);
+    window.removeEventListener("pagehide", teardown);
+  }
+
+  document.addEventListener("turbo:before-visit", teardown);
+  window.addEventListener("pagehide", teardown);
+
+  function showPollingStopped() {
+    var text = document.getElementById("progress-text");
+    if (text) {
+      text.textContent = "Live updates unavailable - refresh the page to see current progress.";
+    }
+  }
+
   function poll() {
-    fetch(statusUrl, { headers: { "Accept": "application/json" } })
-      .then(function(res) { return res.json(); })
+    fetch(statusUrl, { headers: { "Accept": "application/json" }, signal: abortController.signal })
+      .then(function(res) {
+        if (!res.ok) { throw new Error("HTTP " + res.status); }
+        return res.json();
+      })
       .then(function(data) {
+        consecutiveFailures = 0;
+
         var badge = document.getElementById("status-badge");
         if (badge) {
           badge.textContent = data.status;
@@ -189,13 +216,21 @@
 
         if (reloadStatuses.indexOf(data.status) !== -1) {
           clearInterval(timer);
-          setTimeout(function() { window.location.reload(); }, 500);
+          timer = null;
+          reloadTimer = setTimeout(function() { window.location.reload(); }, 500);
         }
       })
-      .catch(function() {});
+      .catch(function(err) {
+        if (err && err.name === "AbortError") { return; }
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          teardown();
+          showPollingStopped();
+        }
+      });
   }
 
-  var timer = setInterval(poll, POLL_INTERVAL);
+  timer = setInterval(poll, POLL_INTERVAL);
 })();
 </script>
 <% end %>

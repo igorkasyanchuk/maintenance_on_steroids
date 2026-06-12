@@ -4,6 +4,7 @@ module MaintenanceOnSteroids
       @run = run
       @form_inputs = form_inputs.index_by(&:name)
       @scalar_data = (run.params || {}).with_indifferent_access
+      @blob_cache = {}
     end
 
     def [](key)
@@ -11,10 +12,14 @@ module MaintenanceOnSteroids
       input = @form_inputs[key]
 
       if input&.blob?
+        return @blob_cache[key] if @blob_cache.key?(key)
+
         artifact = @run.artifacts.find_by(name: key.to_s, kind: "input")
-        artifact&.data_blob
+        @blob_cache[key] = artifact&.data_blob
       else
-        cast_value(@scalar_data[key], input&.type)
+        value = @scalar_data[key]
+        value = input.default if value.nil? && input
+        cast_value(value, input&.type)
       end
     end
 
@@ -44,10 +49,22 @@ module MaintenanceOnSteroids
       when :integer  then value.to_i
       when :float    then value.to_f
       when :boolean  then ActiveModel::Type::Boolean.new.cast(value)
-      when :date     then value.is_a?(Date) ? value : Date.parse(value.to_s)
-      when :datetime then value.is_a?(Time) ? value : Time.zone.parse(value.to_s)
+      when :date     then parse_date(value)
+      when :datetime then parse_datetime(value)
       else value
       end
+    end
+
+    def parse_date(value)
+      value.is_a?(Date) ? value : Date.parse(value.to_s)
+    rescue ArgumentError, TypeError
+      nil
+    end
+
+    def parse_datetime(value)
+      value.is_a?(Time) ? value : Time.zone.parse(value.to_s)
+    rescue ArgumentError, TypeError
+      nil
     end
   end
 end

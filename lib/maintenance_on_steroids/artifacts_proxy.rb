@@ -18,7 +18,16 @@ module MaintenanceOnSteroids
 
       record = find_or_create_record(name, definition)
       write_value(record, definition, value)
-      record.save!
+      begin
+        record.save!
+      rescue ActiveRecord::RecordNotUnique
+        # A concurrent writer created the row first (unique index on
+        # run_id/name/kind) -- write into the existing record instead.
+        record = @run.artifacts.find_by!(name: name.to_s, kind: "output")
+        record.artifact_type = definition.storage_type.to_s
+        write_value(record, definition, value)
+        record.save!
+      end
       @cache[name] = wrap(record, definition)
     end
 
@@ -42,18 +51,18 @@ module MaintenanceOnSteroids
 
       storage = definition.storage_type
 
+      # Reads must not INSERT: build the record lazily and persist it only
+      # on first save! / assignment. (update! on a new record saves it.)
       record = @run.artifacts.find_by(name: name.to_s, kind: "output")
-      unless record
-        record = @run.artifacts.create!(
-          name: name.to_s,
-          kind: "output",
-          artifact_type: storage.to_s,
-          data_jsonb: storage == :jsonb ? (definition.default || {}) : nil,
-          data_text: storage == :text ? (definition.default || "") : nil,
-          data_blob: storage == :blob ? definition.default : nil,
-          file_name: definition.file_name
-        )
-      end
+      record ||= @run.artifacts.new(
+        name: name.to_s,
+        kind: "output",
+        artifact_type: storage.to_s,
+        data_jsonb: storage == :jsonb ? (definition.default || {}) : nil,
+        data_text: storage == :text ? (definition.default || "") : nil,
+        data_blob: storage == :blob ? definition.default : nil,
+        file_name: definition.file_name
+      )
 
       wrap(record, definition)
     end

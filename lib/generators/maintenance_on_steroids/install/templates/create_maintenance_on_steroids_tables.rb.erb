@@ -21,6 +21,9 @@ class CreateMaintenanceOnSteroidsTables < ActiveRecord::Migration<%= migration_v
 
     add_index :maintenance_on_steroids_runs, :task_class
     add_index :maintenance_on_steroids_runs, :status
+    add_index :maintenance_on_steroids_runs, :created_at
+    add_index :maintenance_on_steroids_runs, [:task_class, :status]
+    add_index :maintenance_on_steroids_runs, [:task_class, :created_at]
 
     create_table :maintenance_on_steroids_artifacts do |t|
       t.references :run, null: false, foreign_key: { to_table: :maintenance_on_steroids_runs }
@@ -38,6 +41,6 @@ class CreateMaintenanceOnSteroidsTables < ActiveRecord::Migration<%= migration_v
       t.timestamps
     end
 
-    add_index :maintenance_on_steroids_artifacts, [:run_id, :name, :kind], name: "idx_mos_artifacts_run_name_kind"
+    add_index :maintenance_on_steroids_artifacts, [:run_id, :name, :kind], unique: true, name: "idx_mos_artifacts_run_name_kind"
   end
 end

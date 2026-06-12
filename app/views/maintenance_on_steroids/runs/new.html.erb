@@ -12,9 +12,7 @@
 </div>
 
 <div class="card">
-  <form action="<%= job_runs_path(job_id: @task_class.name) %>" method="post" enctype="multipart/form-data">
-    <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
-
+  <%= form_with url: job_runs_path(job_id: @task_class.name), method: :post, multipart: true do %>
     <% if @task_class.form_inputs.any? %>
       <% @task_class.form_inputs.each do |input| %>
         <div class="form-group">
@@ -96,5 +94,5 @@
       <button type="submit" class="btn btn-primary">Start Run</button>
       <a href="<%= job_path(id: @task_class.name) %>" class="btn btn-outline">Cancel</a>
     </div>
-  </form>
+  <% end %>
 </div>

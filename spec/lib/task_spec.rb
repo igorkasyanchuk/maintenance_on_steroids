@@ -62,6 +62,19 @@ RSpec.describe MaintenanceOnSteroids::Task do
     it "returns nil queue for tasks without job config" do
       expect(SimpleCallableTask.job_config.queue_name).to be_nil
     end
+
+    it "configures and reads back priority" do
+      klass = Class.new(MaintenanceOnSteroids::Task) do
+        job do
+          priority 10
+        end
+      end
+      expect(klass.job_config.priority).to eq(10)
+    end
+
+    it "returns nil priority when not configured" do
+      expect(SimpleCallableTask.job_config.priority).to be_nil
+    end
   end
 
   describe "AboutDsl" do
@@ -250,20 +263,23 @@ RSpec.describe MaintenanceOnSteroids::Task do
       expect(task.instance_variable_get(:@interrupted)).to be true
     end
 
-    it "supports block callbacks" do
+    it "supports lambda callbacks" do
       triggered = false
       klass = Class.new(MaintenanceOnSteroids::Task) do
         after_start -> { triggered = true }
       end
 
-      # Block callbacks need a different approach - use method callbacks for testing
-      # Test that the DSL method exists and can be called
-      expect(klass).to respond_to(:after_start)
-      expect(klass).to respond_to(:after_complete)
-      expect(klass).to respond_to(:after_error)
-      expect(klass).to respond_to(:after_pause)
-      expect(klass).to respond_to(:after_cancel)
-      expect(klass).to respond_to(:after_interrupt)
+      klass.new.run_start_callbacks
+      expect(triggered).to be true
+    end
+
+    it "supports block callbacks" do
+      triggered = false
+      klass = Class.new(MaintenanceOnSteroids::Task)
+      klass.after_complete { triggered = true }
+
+      klass.new.run_complete_callbacks
+      expect(triggered).to be true
     end
   end
 
