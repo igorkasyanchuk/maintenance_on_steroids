@@ -1,0 +1,172 @@
+<div class="page-header">
+  <div>
+    <h1>Dashboard</h1>
+    <p class="subtitle">Maintenance tasks overview</p>
+  </div>
+</div>
+
+<%# Stats Cards %>
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-number"><%= @stats[:total_tasks] %></div>
+    <div class="stat-label">Available Tasks</div>
+  </div>
+  <div class="stat-card stat-card-active">
+    <div class="stat-number"><%= @stats[:active_runs] %></div>
+    <div class="stat-label">Active Runs</div>
+  </div>
+  <div class="stat-card stat-card-completed">
+    <div class="stat-number"><%= @stats[:completed] %></div>
+    <div class="stat-label">Completed</div>
+  </div>
+  <div class="stat-card stat-card-errored">
+    <div class="stat-number"><%= @stats[:errored] %></div>
+    <div class="stat-label">Errored</div>
+  </div>
+</div>
+
+<%# Currently Active Runs %>
+<div class="dashboard-section">
+  <h2>Active Runs</h2>
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <% if @active_runs.any? %>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Task</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Duration</th>
+            <th>User</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @active_runs.each do |run| %>
+            <tr>
+              <td><a href="<%= run_path(run) %>">#<%= run.id %></a></td>
+              <td>
+                <% if run.task_exists? %>
+                  <a href="<%= job_path(id: run.task_class) %>"><%= run.task_title %></a>
+                <% else %>
+                  <span style="color: var(--text-muted);" title="Task class no longer exists"><%= run.task_class %></span>
+                <% end %>
+              </td>
+              <td><span class="badge badge-<%= run.status %>"><%= run.status %></span></td>
+              <td>
+                <% if run.progress_total > 0 %>
+                  <div class="progress-container" style="height: 10px; width: 100px; display: inline-block; vertical-align: middle;">
+                    <div class="progress-bar" style="width: <%= run.progress_percentage %>%; height: 100%;"></div>
+                  </div>
+                  <span style="font-size: 12px; color: var(--text-muted); margin-left: 6px;"><%= run.progress_percentage %>%</span>
+                <% else %>
+                  <span style="color: var(--text-muted);">&mdash;</span>
+                <% end %>
+              </td>
+              <td><%= run.formatted_duration %></td>
+              <td><%= run.user_id.present? ? run.user_display : "&mdash;".html_safe %></td>
+              <td><a href="<%= run_path(run) %>" class="btn btn-outline btn-sm">View</a></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <div class="empty-state" style="padding: 32px;">
+        <p>No active runs</p>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<%# Recent History %>
+<div class="dashboard-section">
+  <h2>Recent History</h2>
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <% if @recent_runs.any? %>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Task</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Duration</th>
+            <th>User</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @recent_runs.each do |run| %>
+            <tr>
+              <td><a href="<%= run_path(run) %>">#<%= run.id %></a></td>
+              <td>
+                <% if run.task_exists? %>
+                  <a href="<%= job_path(id: run.task_class) %>"><%= run.task_title %></a>
+                <% else %>
+                  <span style="color: var(--text-muted);" title="Task class no longer exists"><%= run.task_class %></span>
+                <% end %>
+              </td>
+              <td><span class="badge badge-<%= run.status %>"><%= run.status %></span></td>
+              <td>
+                <% if run.progress_total > 0 %>
+                  <%= run.progress_current %> / <%= run.progress_total %>
+                <% else %>
+                  <span style="color: var(--text-muted);">&mdash;</span>
+                <% end %>
+              </td>
+              <td><%= run.formatted_duration %></td>
+              <td><%= run.user_id.present? ? run.user_display : "&mdash;".html_safe %></td>
+              <td style="white-space: nowrap;"><%= run.created_at.strftime("%b %d, %Y %H:%M") %></td>
+              <td><a href="<%= run_path(run) %>" class="btn btn-outline btn-sm">View</a></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <div class="empty-state" style="padding: 32px;">
+        <p>No runs yet</p>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<%# Available Tasks %>
+<div class="dashboard-section">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+    <h2>Available Tasks</h2>
+    <a href="<%= jobs_path %>" class="btn btn-outline btn-sm">View All</a>
+  </div>
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <% if @task_classes.any? %>
+      <% @task_classes.each do |task_class| %>
+        <a href="<%= job_path(id: task_class.name) %>" class="task-list-item">
+          <div>
+            <div class="task-name"><%= task_class.task_title %></div>
+            <% if task_class.task_description %>
+              <div class="task-desc"><%= task_class.task_description %></div>
+            <% end %>
+            <div class="task-meta">
+              <%= task_class.name %>
+              <% if task_class.task_owner %>
+                &middot; Owner: <%= task_class.task_owner %>
+              <% end %>
+            </div>
+          </div>
+          <div>
+            <% active_runs = MaintenanceOnSteroids::Run.where(task_class: task_class.name).active.count %>
+            <% if active_runs > 0 %>
+              <span class="badge badge-running"><%= active_runs %> active</span>
+            <% end %>
+          </div>
+        </a>
+      <% end %>
+    <% else %>
+      <div class="empty-state">
+        <h3>No tasks found</h3>
+        <p>Create task classes in <code>app/maintenance/</code> that inherit from <code>MaintenanceOnSteroids::Task</code></p>
+      </div>
+    <% end %>
+  </div>
+</div>

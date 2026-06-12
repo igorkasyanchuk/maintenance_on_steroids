@@ -1,0 +1,1 @@
+Rails.application.config.secret_key_base = "test_secret_key_base_for_maintenance_on_steroids_dummy_app_only"

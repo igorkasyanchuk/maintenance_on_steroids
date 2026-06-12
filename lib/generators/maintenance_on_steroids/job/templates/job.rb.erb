@@ -1,0 +1,30 @@
+class <%= class_name %> < MaintenanceOnSteroids::Task
+  about do
+    title "<%= class_name.titleize %>"
+    description "TODO: Add description"
+  end
+
+<% if options[:collection] %>
+  # form do
+  #   input :name, type: :string, required: true
+  # end
+
+  # artifact :result, type: :jsonb, default: {}
+
+  def collection
+    # Return an ActiveRecord::Relation
+    # Example: User.where(active: true)
+    raise NotImplementedError, "Define the collection to process"
+  end
+
+  def process(record)
+    # Process a single record from the collection
+    raise NotImplementedError, "Define how to process each record"
+  end
+<% else %>
+  def call
+    # Implement your one-off task here
+    raise NotImplementedError, "Define the task logic"
+  end
+<% end %>
+end

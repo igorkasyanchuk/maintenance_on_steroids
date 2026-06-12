@@ -1,0 +1,38 @@
+<div style="text-align: center; padding-top: 60px;">
+  <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 12px;">Maintenance on Steroids</h1>
+  <p style="color: #6b7280; font-size: 18px; margin-bottom: 40px;">Dummy app for development &amp; testing</p>
+
+  <% if user_signed_in? %>
+    <div style="background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 32px; max-width: 500px; margin: 0 auto;">
+      <p style="margin-bottom: 8px;">Signed in as <strong><%= current_user.email %></strong></p>
+      <p style="margin-bottom: 24px; color: #6b7280;">
+        Role: <strong><%= current_user.role %></strong>
+        <% unless current_user.admin? %>
+          <span style="color: #dc2626;">(admin required for maintenance tasks)</span>
+        <% end %>
+      </p>
+
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <% if current_user.admin? %>
+          <a href="/maintenance"
+             style="display: inline-block; padding: 12px 24px; background: #4f46e5; color: white; border-radius: 8px; text-decoration: none; font-weight: 500;">
+            Open Maintenance Tasks
+          </a>
+        <% end %>
+        <%= button_to "Sign out", destroy_user_session_path, method: :delete,
+            style: "display: inline-block; padding: 12px 24px; background: white; color: #374151; border: 1px solid #d1d5db; border-radius: 8px; text-decoration: none; font-weight: 500; cursor: pointer; font-family: inherit; font-size: inherit;" %>
+      </div>
+    </div>
+  <% else %>
+    <div style="display: flex; gap: 12px; justify-content: center;">
+      <a href="<%= new_user_session_path %>"
+         style="display: inline-block; padding: 12px 24px; background: #4f46e5; color: white; border-radius: 8px; text-decoration: none; font-weight: 500;">
+        Sign in
+      </a>
+      <a href="<%= new_user_registration_path %>"
+         style="display: inline-block; padding: 12px 24px; background: white; color: #374151; border: 1px solid #d1d5db; border-radius: 8px; text-decoration: none; font-weight: 500;">
+        Sign up
+      </a>
+    </div>
+  <% end %>
+</div>

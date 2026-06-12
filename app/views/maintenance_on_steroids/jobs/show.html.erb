@@ -1,0 +1,92 @@
+<div class="breadcrumb">
+  <a href="<%= jobs_path %>">Tasks</a> &rsaquo; <%= @task_class.task_title %>
+</div>
+
+<div class="page-header">
+  <div>
+    <h1><%= @task_class.task_title %></h1>
+    <% if @task_class.task_description %>
+      <p class="subtitle"><%= @task_class.task_description %></p>
+    <% end %>
+  </div>
+  <div class="btn-group">
+    <a href="<%= source_job_path(id: @task_class.name) %>" class="btn btn-outline btn-sm">Source</a>
+    <a href="<%= new_job_run_path(job_id: @task_class.name) %>" class="btn btn-primary btn-sm">New Run</a>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom: 20px;">
+  <div class="info-grid">
+    <div class="info-item">
+      <label>Class</label>
+      <div class="value"><%= @task_class.name %></div>
+    </div>
+    <% if @task_class.task_owner %>
+      <div class="info-item">
+        <label>Owner</label>
+        <div class="value"><%= @task_class.task_owner %></div>
+      </div>
+    <% end %>
+    <% if @task_class.job_config.queue_name %>
+      <div class="info-item">
+        <label>Queue</label>
+        <div class="value"><%= @task_class.job_config.queue_name %></div>
+      </div>
+    <% end %>
+    <% if @task_class.form_inputs.any? %>
+      <div class="info-item">
+        <label>Inputs</label>
+        <div class="value"><%= @task_class.form_inputs.map { |i| "#{i.name} (#{i.type})" }.join(", ") %></div>
+      </div>
+    <% end %>
+    <% if @task_class.artifact_definitions.any? %>
+      <div class="info-item">
+        <label>Artifacts</label>
+        <div class="value"><%= @task_class.artifact_definitions.map { |a| "#{a.name} (#{a.type})" }.join(", ") %></div>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<h2>Runs</h2>
+<div class="card" style="padding: 0; overflow: hidden; margin-top: 8px;">
+  <% if @runs.any? %>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Status</th>
+          <th>Progress</th>
+          <th>Duration</th>
+          <th>User</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @runs.each do |run| %>
+          <tr>
+            <td><a href="<%= run_path(run) %>">#<%= run.id %></a></td>
+            <td><span class="badge badge-<%= run.status %>"><%= run.status %></span></td>
+            <td>
+              <% if run.progress_total > 0 %>
+                <%= run.progress_current %> / <%= run.progress_total %> (<%= run.progress_percentage %>%)
+              <% else %>
+                —
+              <% end %>
+            </td>
+            <td><%= run.formatted_duration %></td>
+            <td><%= run.user_id.present? ? run.user_display : "—" %></td>
+            <td style="white-space: nowrap;"><%= run.created_at.strftime("%b %d, %Y %H:%M") %></td>
+            <td><a href="<%= run_path(run) %>" class="btn btn-outline btn-sm">View</a></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <div class="empty-state">
+      <h3>No runs yet</h3>
+      <p>Click "New Run" to start this task.</p>
+    </div>
+  <% end %>
+</div>

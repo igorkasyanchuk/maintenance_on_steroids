@@ -1,0 +1,59 @@
+module MaintenanceOnSteroids
+  class ApplicationController < ActionController::Base
+    protect_from_forgery with: :exception
+
+    layout "maintenance_on_steroids/application"
+
+    before_action :verify_http_basic_authentication
+    before_action :run_authentication_hook
+    before_action :verify_access
+
+    private
+
+    # Step 1: HTTP Basic auth (if enabled)
+    def verify_http_basic_authentication
+      return unless MaintenanceOnSteroids.http_basic_authentication_enabled
+
+      authenticate_or_request_with_http_basic("Maintenance on Steroids") do |username, password|
+        ActiveSupport::SecurityUtils.secure_compare(username, MaintenanceOnSteroids.http_basic_authentication_user_name.to_s) &
+          ActiveSupport::SecurityUtils.secure_compare(password, MaintenanceOnSteroids.http_basic_authentication_password.to_s)
+      end
+    end
+
+    # Step 3: Proc-based access check (if configured)
+    def verify_access
+      return unless MaintenanceOnSteroids.verify_access_proc
+
+      unless MaintenanceOnSteroids.verify_access_proc.call(self)
+        render plain: "Access denied", status: :forbidden
+      end
+    end
+
+    # Step 2: General-purpose authentication hook (if configured)
+    def run_authentication_hook
+      return unless MaintenanceOnSteroids.authentication
+
+      instance_exec(&MaintenanceOnSteroids.authentication)
+    end
+
+    def set_task_class
+      @task_class = MaintenanceOnSteroids::JobRegistry.find(params[:job_id] || params[:id])
+    end
+
+    # Resolve the current user in controller context where Devise/Warden methods are available.
+    # The resolver proc receives the controller so it can call current_user, etc.
+    def resolve_current_user
+      resolver = MaintenanceOnSteroids.current_user_resolver
+      return nil unless resolver
+
+      if resolver.arity == 0
+        resolver.call
+      else
+        resolver.call(self)
+      end
+    rescue => e
+      Rails.logger.debug "[MaintenanceOnSteroids] Could not resolve current user: #{e.message}"
+      nil
+    end
+  end
+end

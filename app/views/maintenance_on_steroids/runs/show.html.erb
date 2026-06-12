@@ -1,0 +1,201 @@
+<div class="breadcrumb">
+  <a href="<%= jobs_path %>">Tasks</a> &rsaquo;
+  <a href="<%= job_path(id: @run.task_class) %>"><%= @task_class_obj.task_title %></a> &rsaquo;
+  Run #<%= @run.id %>
+</div>
+
+<div class="page-header">
+  <div>
+    <h1>Run #<%= @run.id %></h1>
+    <p class="subtitle"><%= @task_class_obj.task_title %></p>
+  </div>
+  <div class="btn-group">
+    <% if @run.pausable? %>
+      <form action="<%= pause_run_path(@run) %>" method="post" style="display: inline;">
+        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+        <button type="submit" class="btn btn-warning btn-sm">Pause</button>
+      </form>
+    <% end %>
+    <% if @run.resumable? %>
+      <form action="<%= resume_run_path(@run) %>" method="post" style="display: inline;">
+        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+        <button type="submit" class="btn btn-success btn-sm">Resume</button>
+      </form>
+    <% end %>
+    <% if @run.cancellable? %>
+      <form action="<%= cancel_run_path(@run) %>" method="post" style="display: inline;"
+            onsubmit="return confirm('Are you sure you want to cancel this run?');">
+        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+        <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
+      </form>
+    <% end %>
+  </div>
+</div>
+
+<%# Status & Progress Card %>
+<div class="card">
+  <div class="info-grid" style="margin-bottom: 20px;">
+    <div class="info-item">
+      <label>Status</label>
+      <div class="value">
+        <span id="status-badge" class="badge badge-<%= @run.status %>"><%= @run.status %></span>
+      </div>
+    </div>
+    <div class="info-item">
+      <label>Duration</label>
+      <div class="value" id="run-duration"><%= @run.formatted_duration %></div>
+    </div>
+    <div class="info-item">
+      <label>Started</label>
+      <div class="value"><%= @run.started_at&.strftime("%b %d, %Y %H:%M:%S") || "—" %></div>
+    </div>
+    <div class="info-item">
+      <label>Completed</label>
+      <div class="value"><%= @run.completed_at&.strftime("%b %d, %Y %H:%M:%S") || "—" %></div>
+    </div>
+    <% if @run.user_id.present? %>
+      <div class="info-item">
+        <label>Triggered By</label>
+        <div class="value"><%= @run.user_display %></div>
+      </div>
+    <% end %>
+  </div>
+
+  <% if @run.progress_total > 0 || @run.active? %>
+    <label style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; display: block;">
+      Progress
+    </label>
+    <div class="progress-container">
+      <div
+        id="progress-bar"
+        class="progress-bar<%= " completed" if @run.completed? %><%= " errored" if @run.errored? %>"
+        style="width: <%= @run.progress_percentage %>%;"
+      ></div>
+    </div>
+    <div class="progress-text" id="progress-text">
+      <%= @run.progress_current %> / <%= @run.progress_total %> (<%= @run.progress_percentage %>%)
+    </div>
+  <% end %>
+</div>
+
+<%# Error Card %>
+<% if @run.errored? && @run.error_message.present? %>
+  <div class="error-box">
+    <h3>Error</h3>
+    <p style="margin-top: 4px;"><%= @run.error_message %></p>
+    <% if @run.error_backtrace.present? %>
+      <pre><%= @run.error_backtrace %></pre>
+    <% end %>
+  </div>
+<% end %>
+
+<%# Parameters Card %>
+<% if @run.params.present? && @run.params.any? %>
+  <div class="card" style="margin-top: 16px;">
+    <h3 style="margin-bottom: 12px;">Parameters</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @run.params.each do |key, value| %>
+          <tr>
+            <td><strong><%= key %></strong></td>
+            <td style="font-family: monospace; font-size: 13px;"><%= value %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% end %>
+
+<%# Input Files Card %>
+<% input_artifacts = @run.input_artifacts %>
+<% if input_artifacts.any? %>
+  <div class="card" style="margin-top: 16px;">
+    <h3 style="margin-bottom: 12px;">Input Files</h3>
+    <% input_artifacts.each do |artifact| %>
+      <div class="artifact-card">
+        <span class="artifact-name"><%= artifact.name %></span>
+        <span class="artifact-type">&middot; <%= artifact.file_name %> (<%= artifact.human_size %>)</span>
+        <% if artifact.downloadable? %>
+          <a href="<%= artifact_download_run_path(@run, artifact_id: artifact.id) %>" class="btn btn-outline btn-sm" style="margin-left: 8px;">Download</a>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+<% end %>
+
+<%# Output Artifacts Card %>
+<% output_artifacts = @run.output_artifacts %>
+<% if output_artifacts.any? %>
+  <div class="card" style="margin-top: 16px;">
+    <h3 style="margin-bottom: 12px;">Artifacts</h3>
+    <% output_artifacts.each do |artifact| %>
+      <div class="artifact-card">
+        <span class="artifact-name"><%= artifact.name %></span>
+        <span class="artifact-type">&middot; <%= artifact.artifact_type %></span>
+        <% if artifact.downloadable? %>
+          <a href="<%= artifact_download_run_path(@run, artifact_id: artifact.id) %>" class="btn btn-outline btn-sm" style="margin-left: 8px;">Download</a>
+        <% end %>
+        <% if artifact.artifact_type == "jsonb" && artifact.data_jsonb.present? %>
+          <pre><%= JSON.pretty_generate(artifact.data_jsonb) %></pre>
+        <% elsif artifact.artifact_type == "text" && artifact.data_text.present? %>
+          <pre><%= artifact.data_text %></pre>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+<% end %>
+
+<%# Live polling script for active runs %>
+<% if @run.active? %>
+<script>
+(function() {
+  var POLL_INTERVAL = 2000;
+  var statusUrl = "<%= status_run_path(@run) %>";
+  var initialStatus = "<%= @run.status %>";
+  var reloadStatuses = ["completed", "errored", "cancelled", "paused"];
+
+  function poll() {
+    fetch(statusUrl, { headers: { "Accept": "application/json" } })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        var badge = document.getElementById("status-badge");
+        if (badge) {
+          badge.textContent = data.status;
+          badge.className = "badge badge-" + data.status;
+        }
+
+        var bar = document.getElementById("progress-bar");
+        if (bar) {
+          bar.style.width = data.progress_percentage + "%";
+          if (data.status === "completed") bar.classList.add("completed");
+          if (data.status === "errored") bar.classList.add("errored");
+        }
+
+        var text = document.getElementById("progress-text");
+        if (text) {
+          text.textContent = data.progress_current + " / " + data.progress_total + " (" + data.progress_percentage + "%)";
+        }
+
+        var duration = document.getElementById("run-duration");
+        if (duration) {
+          duration.textContent = data.formatted_duration;
+        }
+
+        if (reloadStatuses.indexOf(data.status) !== -1) {
+          clearInterval(timer);
+          setTimeout(function() { window.location.reload(); }, 500);
+        }
+      })
+      .catch(function() {});
+  }
+
+  var timer = setInterval(poll, POLL_INTERVAL);
+})();
+</script>
+<% end %>

@@ -1,0 +1,31 @@
+<div class="breadcrumb">
+  <a href="<%= jobs_path %>">Tasks</a> &rsaquo;
+  <a href="<%= job_path(id: @task_class.name) %>"><%= @task_class.task_title %></a> &rsaquo;
+  Source
+</div>
+
+<div class="page-header">
+  <div>
+    <h1>Source: <%= @task_class.task_title %></h1>
+    <p class="subtitle"><%= @task_class.name %></p>
+  </div>
+  <a href="<%= job_path(id: @task_class.name) %>" class="btn btn-outline btn-sm">Back</a>
+</div>
+
+<% if @source_code %>
+  <div class="source-code-container">
+    <div class="source-code-header">
+      <span><%= @source_file %></span>
+    </div>
+    <div class="source-code-body">
+      <pre><% @source_code.lines.each_with_index do |line, idx| %><div class="source-line"><span class="source-line-number"><%= idx + 1 %></span><span class="source-line-content"><%= ERB::Util.html_escape(line.chomp) %></span></div><% end %></pre>
+    </div>
+  </div>
+<% else %>
+  <div class="card">
+    <div class="empty-state">
+      <h3>Source unavailable</h3>
+      <p>Could not locate the source file for this task class.</p>
+    </div>
+  </div>
+<% end %>

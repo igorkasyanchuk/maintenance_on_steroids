@@ -1,0 +1,100 @@
+<div class="breadcrumb">
+  <a href="<%= jobs_path %>">Tasks</a> &rsaquo;
+  <a href="<%= job_path(id: @task_class.name) %>"><%= @task_class.task_title %></a> &rsaquo;
+  New Run
+</div>
+
+<div class="page-header">
+  <div>
+    <h1>New Run: <%= @task_class.task_title %></h1>
+    <p class="subtitle">Configure parameters and start the task.</p>
+  </div>
+</div>
+
+<div class="card">
+  <form action="<%= job_runs_path(job_id: @task_class.name) %>" method="post" enctype="multipart/form-data">
+    <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+
+    <% if @task_class.form_inputs.any? %>
+      <% @task_class.form_inputs.each do |input| %>
+        <div class="form-group">
+          <label for="task_params_<%= input.name %>">
+            <%= input.label %>
+            <% if input.required %>
+              <span class="required-mark">*</span>
+            <% end %>
+          </label>
+
+          <% case input.html_input_type %>
+          <% when "textarea" %>
+            <textarea
+              name="task_params[<%= input.name %>]"
+              id="task_params_<%= input.name %>"
+              placeholder="<%= input.placeholder %>"
+              <%= "required" if input.required %>
+            ><%= input.default %></textarea>
+
+          <% when "select" %>
+            <select
+              name="task_params[<%= input.name %>]"
+              id="task_params_<%= input.name %>"
+              <%= "required" if input.required %>
+            >
+              <option value="">Select...</option>
+              <% (input.options || []).each do |opt| %>
+                <option value="<%= opt %>" <%= "selected" if opt.to_s == input.default.to_s %>><%= opt %></option>
+              <% end %>
+            </select>
+
+          <% when "checkbox" %>
+            <div style="padding-top: 4px;">
+              <input
+                type="hidden"
+                name="task_params[<%= input.name %>]"
+                value="0"
+              >
+              <input
+                type="checkbox"
+                name="task_params[<%= input.name %>]"
+                id="task_params_<%= input.name %>"
+                value="1"
+                <%= "checked" if input.default %>
+                style="width: auto;"
+              >
+            </div>
+
+          <% when "file" %>
+            <input
+              type="file"
+              name="task_params[<%= input.name %>]"
+              id="task_params_<%= input.name %>"
+              <%= "required" if input.required %>
+            >
+
+          <% else %>
+            <input
+              type="<%= input.html_input_type %>"
+              name="task_params[<%= input.name %>]"
+              id="task_params_<%= input.name %>"
+              value="<%= input.default %>"
+              placeholder="<%= input.placeholder %>"
+              <%= "required" if input.required %>
+              <% if input.type == :float %>step="any"<% end %>
+            >
+          <% end %>
+
+          <% if input.help_text %>
+            <div class="help-text"><%= input.help_text %></div>
+          <% end %>
+        </div>
+      <% end %>
+    <% else %>
+      <p style="color: var(--text-muted); margin-bottom: 16px;">This task has no input parameters.</p>
+    <% end %>
+
+    <div class="btn-group" style="margin-top: 20px;">
+      <button type="submit" class="btn btn-primary">Start Run</button>
+      <a href="<%= job_path(id: @task_class.name) %>" class="btn btn-outline">Cancel</a>
+    </div>
+  </form>
+</div>

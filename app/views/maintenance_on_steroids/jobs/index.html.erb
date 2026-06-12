@@ -1,0 +1,38 @@
+<div class="page-header">
+  <div>
+    <h1>Maintenance Tasks</h1>
+    <p class="subtitle">Available tasks in your application</p>
+  </div>
+</div>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+  <% if @task_classes.any? %>
+    <% @task_classes.each do |task_class| %>
+      <a href="<%= job_path(id: task_class.name) %>" class="task-list-item">
+        <div>
+          <div class="task-name"><%= task_class.task_title %></div>
+          <% if task_class.task_description %>
+            <div class="task-desc"><%= task_class.task_description %></div>
+          <% end %>
+          <div class="task-meta">
+            <%= task_class.name %>
+            <% if task_class.task_owner %>
+              &middot; Owner: <%= task_class.task_owner %>
+            <% end %>
+          </div>
+        </div>
+        <div>
+          <% active_runs = MaintenanceOnSteroids::Run.where(task_class: task_class.name).active.count %>
+          <% if active_runs > 0 %>
+            <span class="badge badge-running"><%= active_runs %> active</span>
+          <% end %>
+        </div>
+      </a>
+    <% end %>
+  <% else %>
+    <div class="empty-state">
+      <h3>No tasks found</h3>
+      <p>Create task classes in <code>app/maintenance/</code> that inherit from <code>MaintenanceOnSteroids::Task</code></p>
+    </div>
+  <% end %>
+</div>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maintenance on Steroids</title>
+  <%= render "maintenance_on_steroids/shared/styles" %>
+  <script>
+    (function() {
+      var saved = localStorage.getItem('mos-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', saved);
+    })();
+  </script>
+</head>
+<body>
+  <div class="topbar">
+    <a href="<%= root_path %>" class="topbar-brand">
+      <span class="brand-main">Maintenance</span> <span class="brand-highlight">on Steroids</span>
+    </a>
+    <div class="topbar-nav">
+      <a href="<%= root_path %>">Dashboard</a>
+      <a href="<%= jobs_path %>">Tasks</a>
+      <div class="topbar-sep"></div>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="theme-btn">
+        <span id="theme-icon"></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="container">
+    <% if notice %>
+      <div class="flash flash-notice"><%= notice %></div>
+    <% end %>
+    <% if alert %>
+      <div class="flash flash-alert"><%= alert %></div>
+    <% end %>
+
+    <%= yield %>
+  </div>
+
+  <%= render "maintenance_on_steroids/shared/javascript" %>
+</body>
+</html>

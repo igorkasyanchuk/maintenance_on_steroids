@@ -1,0 +1,16 @@
+<script>
+  function toggleTheme() {
+    var html = document.documentElement;
+    var current = html.getAttribute('data-theme');
+    var next = current === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('mos-theme', next);
+    updateThemeIcon();
+  }
+  function updateThemeIcon() {
+    var theme = document.documentElement.getAttribute('data-theme');
+    var icon = document.getElementById('theme-icon');
+    if (icon) icon.textContent = theme === 'dark' ? '\u2600' : '\u263E';
+  }
+  updateThemeIcon();
+</script>
