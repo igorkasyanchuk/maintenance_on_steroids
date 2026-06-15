@@ -15,7 +15,7 @@ A powerful maintenance task runner for **Rails 8.1+** that leverages `ActiveJob:
 - **Pause / Resume / Cancel** -- safely interrupt long-running tasks mid-execution
 - **Instrumentation** -- `ActiveSupport::Notifications` events for every run lifecycle transition
 - **User tracking** -- records who triggered each run with configurable display
-- **Authentication** -- HTTP Basic, Devise integration, custom access procs
+- **Authentication & access control** -- layered, off by default: HTTP Basic (constant-time compare), a custom auth hook for Devise/Warden/etc., and a `verify_access_proc` for role- or IP-based authorization ([jump to setup](#authentication--access-control))
 - **Dark & light themes** -- toggle with one click, persisted in localStorage
 
 ## Requirements
@@ -470,34 +470,67 @@ end
 | `current_user_resolver` | `nil` | Proc returning the current user object |
 | `user_display_formatter` | `nil` | Proc receiving Run, returning display string |
 
-### Authentication Chain
+### Authentication & Access Control
 
-Authentication runs in this order:
+The dashboard is mounted in **your** app, so it inherits your app's middleware — but it ships with **no access control of its own until you configure it**. Three independent layers run as `before_action`s on every engine request, in order. Use any combination; each layer is skipped when its config is left at the default.
 
-1. **HTTP Basic** -- if enabled, prompts for credentials
-2. **Authentication hook** -- custom auth (e.g. `authenticate_user!`)
-3. **Access verification** -- role-based check, returns 403 if denied
+| Order | Layer | Config | When it runs | On failure |
+|-------|-------|--------|--------------|------------|
+| 1 | **HTTP Basic** | `http_basic_authentication_enabled` | Always (when enabled) | `401 Unauthorized` (browser credential prompt) |
+| 2 | **Auth hook** | `authentication` | After Basic passes | Whatever the proc does (usually `redirect_to` sign-in) |
+| 3 | **Access check** | `verify_access_proc` | After the hook | `403 Forbidden` (`"Access denied"`) |
 
-### Devise Integration Example
+> [!WARNING]
+> Access control is **opt-in**. With none of these configured, anyone who can reach the mounted path can run, pause, and cancel maintenance tasks. Configure at least one layer before deploying. The shipped HTTP Basic defaults (`admin` / `secret`) are **placeholders** — always override the password, and prefer HTTPS since Basic credentials travel in every request.
+
+#### Recipe: HTTP Basic (quickest)
+
+Good for a staging box or a small team. Credentials are compared in constant time (`ActiveSupport::SecurityUtils.secure_compare`), so it's not vulnerable to timing attacks.
 
 ```ruby
 # config/initializers/maintenance_on_steroids.rb
 MaintenanceOnSteroids.configure do |config|
+  config.http_basic_authentication_enabled   = true
+  config.http_basic_authentication_user_name = "admin"
+  config.http_basic_authentication_password  = Rails.application.credentials.maintenance_password
+end
+```
+
+#### Recipe: Devise + admin role (most common)
+
+Reuse your app's existing login, then restrict to admins. Point `parent_controller` at your `ApplicationController` so Devise's helpers (`current_user`, `authenticate_user!`) are in scope.
+
+```ruby
+MaintenanceOnSteroids.configure do |config|
   config.parent_controller = "ApplicationController"
 
+  # Layer 2: bounce anyone who isn't signed in
   config.authentication = -> {
-    unless current_user
-      redirect_to main_app.new_user_session_path, alert: "Please sign in."
-    end
+    redirect_to(main_app.new_user_session_path, alert: "Please sign in.") unless current_user
   }
 
-  config.verify_access_proc = ->(controller) {
-    controller.current_user&.role == "admin"
-  }
+  # Layer 3: of the signed-in users, only admins get in (renders 403 otherwise)
+  config.verify_access_proc = ->(controller) { controller.current_user&.admin? }
 
+  # Stamp each run with who triggered it (shown in the UI)
   config.current_user_resolver = -> { current_user }
 end
 ```
+
+#### Recipe: IP allowlist
+
+`verify_access_proc` receives the controller, so any request attribute is fair game — e.g. lock the dashboard to your office/VPN range:
+
+```ruby
+ALLOWED_IPS = %w[203.0.113.4 198.51.100.0/24].map { |ip| IPAddr.new(ip) }
+
+config.verify_access_proc = ->(controller) {
+  ip = IPAddr.new(controller.request.remote_ip)
+  ALLOWED_IPS.any? { |range| range.include?(ip) }
+}
+```
+
+Combine layers freely — e.g. HTTP Basic **and** an IP check both have to pass. Each returns independently, so the first failing layer short-circuits the request.
 
 ## Dashboard
 
