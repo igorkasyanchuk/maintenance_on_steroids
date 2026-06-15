@@ -214,6 +214,7 @@
     if (countdownTimer !== null) { clearInterval(countdownTimer); countdownTimer = null; }
     abortController.abort();
     document.removeEventListener("turbo:before-visit", teardown);
+    document.removeEventListener("turbo:before-cache", teardown);
     window.removeEventListener("pagehide", teardown);
   }
 
@@ -250,6 +251,7 @@
   }
 
   document.addEventListener("turbo:before-visit", teardown);
+  document.addEventListener("turbo:before-cache", teardown);
   window.addEventListener("pagehide", teardown);
 
   function showPollingStopped() {

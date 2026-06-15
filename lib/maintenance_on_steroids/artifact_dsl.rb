@@ -35,15 +35,6 @@ module MaintenanceOnSteroids
         type == :file ? :blob : type
       end
 
-      # Which data_* column backs this artifact.
-      def data_column
-        case storage_type
-        when :jsonb then :data_jsonb
-        when :text  then :data_text
-        else :data_blob # :blob, :csv
-        end
-      end
-
       # Resolved MIME type for downloads: explicit content_type wins, then
       # inference from the file name extension, then a per-type default.
       def resolved_content_type(fallback_file_name = nil)

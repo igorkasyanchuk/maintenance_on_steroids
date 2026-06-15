@@ -113,4 +113,50 @@ RSpec.describe MaintenanceOnSteroids::Instrumentation do
 
     expect(events.map(&:name)).to eq(["cancelled.maintenance_on_steroids"])
   end
+
+  # Regression: a raising subscriber must never affect run outcomes. See
+  # docs/solutions/runtime-errors/unguarded-instrumentation-corrupts-run-status-2026-06-15.md
+  describe "a raising subscriber does not corrupt run state" do
+    def with_raising_subscriber(name)
+      subscriber = ActiveSupport::Notifications.subscribe(name) { raise "bad subscriber" }
+      yield
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+    end
+
+    it "still reaches completed when the succeeded subscriber raises" do
+      run = create_run
+      with_raising_subscriber("succeeded.maintenance_on_steroids") do
+        MaintenanceOnSteroids::RunJob.perform_now(run.id)
+      end
+      expect(run.reload.status).to eq("completed")
+    end
+
+    it "still reaches paused when the paused subscriber raises" do
+      User.create!(name: "Bob", email: "raise-#{SecureRandom.hex(4)}@test.com", password: "password", active: true, age: 1)
+      User.create!(name: "Bob", email: "raise-#{SecureRandom.hex(4)}@test.com", password: "password", active: true, age: 1)
+
+      pausing = Class.new(MaintenanceOnSteroids::Task) do
+        def collection = User.where(active: true)
+        def process(_user)
+          MaintenanceOnSteroids::Run.where(id: run.id, status: "running").update_all(status: "pausing")
+        end
+      end
+      stub_const("RaisingPauseTask", pausing)
+      MaintenanceOnSteroids::JobRegistry.register(pausing)
+      run = create_run(task_class: "RaisingPauseTask")
+
+      with_raising_subscriber("paused.maintenance_on_steroids") do
+        MaintenanceOnSteroids::RunJob.perform_now(run.id)
+      end
+      expect(run.reload.status).to eq("paused")
+    end
+
+    it "does not 500 on enqueue! when the enqueued subscriber raises" do
+      run = create_run
+      with_raising_subscriber("enqueued.maintenance_on_steroids") do
+        expect { run.enqueue! }.not_to raise_error
+      end
+    end
+  end
 end

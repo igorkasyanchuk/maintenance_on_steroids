@@ -81,6 +81,9 @@ module MaintenanceOnSteroids
     # current processing rate. Only meaningful while progress is being tracked.
     def estimated_duration
       return nil unless running? && started_at && progress_total.positive? && progress_current.positive?
+      # No estimate once we've reached (or overshot) the total -- nothing
+      # pending, and progress_current > progress_total would go negative.
+      return nil unless progress_current < progress_total
       duration * (progress_total - progress_current) / progress_current
     end
 
@@ -214,7 +217,8 @@ module MaintenanceOnSteroids
     def safe_instrument(event, extra = {})
       Instrumentation.instrument(event, self, extra)
     rescue => e
-      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): #{e.message}"
+      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): " \
+                         "#{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"
     end
 
     def resolve_current_user

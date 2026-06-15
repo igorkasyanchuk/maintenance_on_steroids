@@ -48,7 +48,15 @@ module MaintenanceOnSteroids
     # Called automatically by RunJob at completion and on pause/cancel.
     def flush!
       @cache.each_value do |cached|
-        cached.save! if cached.respond_to?(:dirty?) && cached.dirty?
+        next unless cached.respond_to?(:dirty?) && cached.dirty?
+
+        begin
+          cached.save!
+        rescue => e
+          # One artifact failing to persist must not strand the others -- log
+          # and keep flushing the rest of the dirty buffers.
+          Rails.logger.error "[MaintenanceOnSteroids] Artifact flush error (#{cached.try(:record)&.name}): #{e.message}"
+        end
       end
     end
 

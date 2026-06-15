@@ -18,11 +18,18 @@ module MaintenanceOnSteroids
       @dirty   = false
 
       if record.data_blob.present?
-        parsed = CSV.parse(record.data_blob)
-        if @headers && parsed.first&.map(&:to_s) == @headers.map(&:to_s)
-          parsed = parsed.drop(1)
+        # A corrupted/partially-written blob must not abort a resume -- start
+        # from an empty buffer instead of raising through RunJob#perform.
+        begin
+          parsed = CSV.parse(record.data_blob)
+          if @headers && parsed.first&.map(&:to_s) == @headers.map(&:to_s)
+            parsed = parsed.drop(1)
+          end
+          @rows = parsed
+        rescue CSV::MalformedCSVError => e
+          Rails.logger.error "[MaintenanceOnSteroids] CSV artifact reload failed (#{record.name}): #{e.message}"
+          @rows = []
         end
-        @rows = parsed
       end
     end
 

@@ -173,7 +173,8 @@ module MaintenanceOnSteroids
     def safe_instrument(event, run, extra = {})
       MaintenanceOnSteroids::Instrumentation.instrument(event, run, extra)
     rescue => e
-      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): #{e.message}"
+      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): " \
+                         "#{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"
     end
 
     # Auto-persists any artifact the task wrote in memory but didn't explicitly
