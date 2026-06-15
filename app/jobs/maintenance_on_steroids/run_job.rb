@@ -166,15 +166,8 @@ module MaintenanceOnSteroids
       Rails.logger.error "[MaintenanceOnSteroids] Callback error: #{e.message}"
     end
 
-    # ActiveSupport::Notifications re-raises subscriber exceptions. Without
-    # this guard a raising subscriber would propagate into the rescue block
-    # and overwrite an already-terminal run as errored (or trigger a retry
-    # storm for :started). Instrumentation must never affect run outcomes.
     def safe_instrument(event, run, extra = {})
-      MaintenanceOnSteroids::Instrumentation.instrument(event, run, extra)
-    rescue => e
-      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): " \
-                         "#{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"
+      MaintenanceOnSteroids::Instrumentation.safe_instrument(event, run, extra)
     end
 
     # Auto-persists any artifact the task wrote in memory but didn't explicitly

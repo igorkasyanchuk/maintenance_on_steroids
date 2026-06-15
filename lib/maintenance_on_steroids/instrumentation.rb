@@ -17,5 +17,17 @@ module MaintenanceOnSteroids
         { run: run, task_name: run.task_class }.merge(extra)
       )
     end
+
+    # Best-effort instrumentation: AS::Notifications re-raises subscriber
+    # exceptions, so every lifecycle call routes through here. A raising
+    # subscriber must never affect run outcomes (corrupt status, 500 a
+    # controller, trigger a retry storm) -- the error is logged and swallowed.
+    # See docs/solutions/runtime-errors/unguarded-instrumentation-corrupts-run-status-2026-06-15.md
+    def self.safe_instrument(event, run, extra = {})
+      instrument(event, run, extra)
+    rescue => e
+      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): " \
+                         "#{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"
+    end
   end
 end

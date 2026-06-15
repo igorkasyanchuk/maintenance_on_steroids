@@ -211,14 +211,8 @@ module MaintenanceOnSteroids
 
     private
 
-    # ActiveSupport::Notifications re-raises subscriber exceptions. A raising
-    # subscriber must not 500 the controller or abort a state transition, so
-    # instrumentation is fired best-effort and any error is logged and swallowed.
     def safe_instrument(event, extra = {})
-      Instrumentation.instrument(event, self, extra)
-    rescue => e
-      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): " \
-                         "#{e.class}: #{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"
+      Instrumentation.safe_instrument(event, self, extra)
     end
 
     def resolve_current_user
