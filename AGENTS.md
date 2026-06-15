@@ -56,6 +56,8 @@ maintenance_on_steroids/
 │   ├── models/                      # Model specs
 │   ├── requests/                    # Integration specs
 │   └── lib/                         # Unit specs
+├── docs/
+│   └── solutions/                   # documented solutions to past problems (bugs, best practices), by category with YAML frontmatter (module, tags, problem_type)
 └── README.md                        # User-facing documentation
 ```
 
