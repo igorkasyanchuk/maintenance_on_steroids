@@ -19,7 +19,17 @@ module MaintenanceOnSteroids
         raise "Cannot save! a detached JsonbArtifact copy (created via dup/merge/except). Save the original artifact instead."
       end
 
-      @_record.update!(data_jsonb: to_h)
+      @_record.data_jsonb = to_h
+      @_record.refresh_metadata!
+      @_record.save!
+    end
+
+    # True when the in-memory contents differ from what's persisted (or from
+    # the lazy default for an unsaved record). Lets the proxy auto-flush only
+    # artifacts that were actually written, avoiding phantom rows for reads.
+    def dirty?
+      return false unless @_record
+      to_h != (@_record.data_jsonb || {})
     end
 
     def record

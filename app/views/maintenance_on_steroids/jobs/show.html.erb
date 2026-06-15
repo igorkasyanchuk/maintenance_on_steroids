@@ -76,7 +76,13 @@
               <% end %>
             </td>
             <td><%= run.formatted_duration %></td>
-            <td><%= run.user_id.present? ? run.user_display : "—" %></td>
+            <td>
+              <% if run.user_id.present? %>
+                <span class="cell-truncate-sm" title="<%= run.user_display %>"><%= run.user_display %></span>
+              <% else %>
+                —
+              <% end %>
+            </td>
             <td style="white-space: nowrap;"><%= run.created_at.strftime("%b %d, %Y %H:%M") %></td>
             <td><a href="<%= run_path(run) %>" class="btn btn-outline btn-sm">View</a></td>
           </tr>

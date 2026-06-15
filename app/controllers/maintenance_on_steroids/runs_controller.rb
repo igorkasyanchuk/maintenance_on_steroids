@@ -93,6 +93,7 @@ module MaintenanceOnSteroids
         progress_total: run.progress_total,
         progress_percentage: run.progress_percentage,
         formatted_duration: run.formatted_duration,
+        formatted_estimated_duration: run.formatted_estimated_duration,
         error_message: run.error_message
       }
     end
@@ -100,8 +101,8 @@ module MaintenanceOnSteroids
     def artifact_download
       artifact = @run.artifacts.find(params[:artifact_id])
       send_data artifact.data_blob,
-                filename: artifact.file_name || "#{artifact.name}.bin",
-                type: artifact.content_type || "application/octet-stream",
+                filename: artifact.download_file_name,
+                type: artifact.download_content_type,
                 disposition: "attachment"
     end
 
@@ -150,7 +151,7 @@ module MaintenanceOnSteroids
         file = params.dig(:task_params, input.name)
         next unless file.respond_to?(:read)
 
-        run.artifacts.create!(
+        artifact = run.artifacts.new(
           name: input.name.to_s,
           kind: "input",
           artifact_type: "blob",
@@ -158,6 +159,8 @@ module MaintenanceOnSteroids
           file_name: file.original_filename,
           content_type: file.content_type
         )
+        artifact.refresh_metadata!
+        artifact.save!
       end
     end
   end

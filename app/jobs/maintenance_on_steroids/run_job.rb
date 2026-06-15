@@ -20,7 +20,10 @@ module MaintenanceOnSteroids
       unless @run.pausing? || @run.cancelling?
         first_start = @run.started_at.nil?
         @run.update!(status: "running", started_at: @run.started_at || Time.current)
-        safe_callback { @task.run_start_callbacks } if first_start
+        if first_start
+          safe_instrument(:started, @run)
+          safe_callback { @task.run_start_callbacks }
+        end
       end
 
       catch(:abort_run) do
@@ -44,7 +47,9 @@ module MaintenanceOnSteroids
         error_backtrace: e.backtrace&.first(50)&.join("\n"),
         completed_at: Time.current
       )
+      safe_instrument(:errored, @run, error: e) if @run
       safe_callback { @task&.run_error_callbacks }
+      flush_artifacts!
       raise
     end
 
@@ -108,7 +113,10 @@ module MaintenanceOnSteroids
       @run.reload
 
       if completed
+        safe_instrument(:succeeded, @run)
         safe_callback { @task.run_complete_callbacks }
+        # Flush AFTER callbacks so any final aggregate they compute persists.
+        flush_artifacts!
       else
         check_status!
       end
@@ -137,12 +145,17 @@ module MaintenanceOnSteroids
       when "pausing"
         safe_callback { @task.run_interrupt_callbacks }
         @run.update!(status: "paused")
+        safe_instrument(:paused, @run)
         safe_callback { @task.run_pause_callbacks }
+        # Persist work-in-progress buffers so a pause/resume doesn't lose them.
+        flush_artifacts!
         throw :abort_run
       when "cancelling"
         safe_callback { @task.run_interrupt_callbacks }
         @run.update!(status: "cancelled", completed_at: Time.current)
+        safe_instrument(:cancelled, @run)
         safe_callback { @task.run_cancel_callbacks }
+        flush_artifacts!
         throw :abort_run
       end
     end
@@ -151,6 +164,24 @@ module MaintenanceOnSteroids
       yield
     rescue => e
       Rails.logger.error "[MaintenanceOnSteroids] Callback error: #{e.message}"
+    end
+
+    # ActiveSupport::Notifications re-raises subscriber exceptions. Without
+    # this guard a raising subscriber would propagate into the rescue block
+    # and overwrite an already-terminal run as errored (or trigger a retry
+    # storm for :started). Instrumentation must never affect run outcomes.
+    def safe_instrument(event, run, extra = {})
+      MaintenanceOnSteroids::Instrumentation.instrument(event, run, extra)
+    rescue => e
+      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): #{e.message}"
+    end
+
+    # Auto-persists any artifact the task wrote in memory but didn't explicitly
+    # save. Dirty-only, so reads never create phantom rows. Never raises.
+    def flush_artifacts!
+      @task&.artifacts&.flush!
+    rescue => e
+      Rails.logger.error "[MaintenanceOnSteroids] Artifact flush error: #{e.message}"
     end
   end
 end

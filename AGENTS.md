@@ -101,7 +101,7 @@ Two tables created via migration:
 - **Engine namespace:** All classes live under `MaintenanceOnSteroids::`.
 - **Host app tasks:** Users place task classes in `app/maintenance/` (autoloaded by the engine).
 - **Authentication:** Three-layer chain — HTTP Basic auth → custom auth proc (e.g., Devise) → access verification proc.
-- **Frontend:** ERB templates with Hotwire/Turbo for live dashboard updates, dark/light theme support.
+- **Frontend:** ERB templates with live dashboard updates, dark/light theme support.
 - **Configuration:** Global config via `MaintenanceOnSteroids.configure` block in an initializer.
 
 ## Development & Testing
@@ -121,4 +121,4 @@ The test suite covers cursor resumption, pause/resume/cancel flows, duplicate pr
 - Follow standard Rails engine patterns.
 - Task DSL modules are mixed into `MaintenanceOnSteroids::Task` via `ActiveSupport::Concern`.
 - Controllers use engine-scoped routes and authentication.
-- Views use partials and Turbo Frames for real-time updates.
+- Views use partials and setInterval for real-time updates.

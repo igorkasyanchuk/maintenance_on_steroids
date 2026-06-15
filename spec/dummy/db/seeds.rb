@@ -27,3 +27,23 @@ puts "  User:  #{user.email} / password (role: user)"
 end
 
 puts "Done! (#{User.count} users total)"
+
+PRODUCT_TARGET = 2000
+missing = PRODUCT_TARGET - Product.count
+if missing.positive?
+  now = Time.current
+  start = Product.count
+  rows = (1..missing).map do |i|
+    n = start + i
+    {
+      name: "Product #{n}",
+      sku: format("SKU-%05d", n),
+      price_cents: rand(100..99_999),
+      status: Product::STATUSES.sample,
+      created_at: now,
+      updated_at: now
+    }
+  end
+  rows.each_slice(500) { |slice| Product.insert_all(slice) }
+end
+puts "Products: #{Product.count} total"

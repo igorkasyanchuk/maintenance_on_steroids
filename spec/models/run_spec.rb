@@ -120,6 +120,37 @@ RSpec.describe MaintenanceOnSteroids::Run, type: :model do
     end
   end
 
+  describe "#formatted_estimated_duration" do
+    it "returns nil when not running" do
+      expect(run.formatted_estimated_duration).to be_nil
+    end
+
+    it "returns nil when no progress yet" do
+      run.update!(status: "running", started_at: 1.minute.ago, progress_current: 0, progress_total: 100)
+      expect(run.formatted_estimated_duration).to be_nil
+    end
+
+    it "shows only seconds for tiny estimates" do
+      run.update!(status: "running", started_at: 10.seconds.ago, progress_current: 50, progress_total: 100)
+      expect(run.formatted_estimated_duration).to match(/\A\d+s\z/)
+    end
+
+    it "shows minutes and seconds when under an hour" do
+      run.update!(status: "running", started_at: 10.minutes.ago, progress_current: 50, progress_total: 100)
+      expect(run.formatted_estimated_duration).to match(/\A\d+m \d+s\z/)
+    end
+
+    it "shows hours, minutes and seconds without days when under a day" do
+      run.update!(status: "running", started_at: 2.hours.ago, progress_current: 10, progress_total: 100)
+      expect(run.formatted_estimated_duration).to match(/\A\d+h \d+m \d+s\z/)
+    end
+
+    it "shows days, hours, minutes and seconds for long estimates" do
+      run.update!(status: "running", started_at: 12.hours.ago, progress_current: 10, progress_total: 100)
+      expect(run.formatted_estimated_duration).to match(/\A\d+d \d+h \d+m \d+s\z/)
+    end
+  end
+
   describe "#pause!" do
     it "transitions from running to pausing" do
       run.update!(status: "running")

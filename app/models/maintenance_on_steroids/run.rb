@@ -77,6 +77,31 @@ module MaintenanceOnSteroids
       end
     end
 
+    # Estimated time remaining for the pending records, extrapolated from the
+    # current processing rate. Only meaningful while progress is being tracked.
+    def estimated_duration
+      return nil unless running? && started_at && progress_total.positive? && progress_current.positive?
+      duration * (progress_total - progress_current) / progress_current
+    end
+
+    def formatted_estimated_duration
+      total = estimated_duration
+      return nil unless total
+
+      total = total.round
+      days = total / 86_400
+      hours = (total % 86_400) / 3600
+      mins = (total % 3600) / 60
+      secs = total % 60
+
+      parts = []
+      parts << "#{days}d" if days.positive?
+      parts << "#{hours}h" if hours.positive? || days.positive?
+      parts << "#{mins}m" if mins.positive? || hours.positive? || days.positive?
+      parts << "#{secs}s"
+      parts.join(" ")
+    end
+
     def task_instance
       @task_instance ||= task_class.constantize.new(self)
     end
@@ -88,6 +113,7 @@ module MaintenanceOnSteroids
       job.priority = job_config.priority if job_config.priority
       job.enqueue
       update!(active_job_id: job.job_id)
+      safe_instrument(:enqueued)
     end
 
     # Returns true when the transition was performed, false otherwise.
@@ -110,6 +136,7 @@ module MaintenanceOnSteroids
 
       reload
       enqueue!
+      safe_instrument(:resumed)
       true
     end
 
@@ -120,6 +147,7 @@ module MaintenanceOnSteroids
     def cancel!
       if enqueued? || paused?
         update!(status: "cancelled", completed_at: Time.current)
+        safe_instrument(:cancelled)
         true
       elsif running? || pausing?
         update!(status: "cancelling")
@@ -179,6 +207,15 @@ module MaintenanceOnSteroids
     end
 
     private
+
+    # ActiveSupport::Notifications re-raises subscriber exceptions. A raising
+    # subscriber must not 500 the controller or abort a state transition, so
+    # instrumentation is fired best-effort and any error is logged and swallowed.
+    def safe_instrument(event, extra = {})
+      Instrumentation.instrument(event, self, extra)
+    rescue => e
+      Rails.logger.error "[MaintenanceOnSteroids] Instrumentation error (#{event}): #{e.message}"
+    end
 
     def resolve_current_user
       resolver = MaintenanceOnSteroids.current_user_resolver

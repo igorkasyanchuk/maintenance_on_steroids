@@ -6,7 +6,7 @@
 </div>
 
 <%# Stats Cards %>
-<div class="stats-grid">
+<div class="stats-grid" id="dashboard-stats">
   <div class="stat-card">
     <div class="stat-number"><%= @stats[:total_tasks] %></div>
     <div class="stat-label">Available Tasks</div>
@@ -28,7 +28,7 @@
 <%# Currently Active Runs %>
 <div class="dashboard-section">
   <h2>Active Runs</h2>
-  <div class="card" style="padding: 0; overflow: hidden;">
+  <div class="card" style="padding: 0; overflow: hidden;" id="active-runs-section">
     <% if @active_runs.any? %>
       <table>
         <thead>
@@ -48,12 +48,17 @@
               <td><a href="<%= run_path(run) %>">#<%= run.id %></a></td>
               <td>
                 <% if run.task_exists? %>
-                  <a href="<%= job_path(id: run.task_class) %>"><%= run.task_title %></a>
+                  <a href="<%= job_path(id: run.task_class) %>" class="cell-truncate" title="<%= run.task_title %>"><%= run.task_title %></a>
                 <% else %>
-                  <span style="color: var(--text-muted);" title="Task class no longer exists"><%= run.task_class %></span>
+                  <span class="cell-truncate" style="color: var(--text-muted);" title="<%= run.task_class %> (task class no longer exists)"><%= run.task_class %></span>
                 <% end %>
               </td>
-              <td><span class="badge badge-<%= run.status %>"><%= run.status %></span></td>
+              <td>
+                <span class="badge badge-<%= run.status %>"><%= run.status %></span>
+                <% if (artifact_count = @artifact_counts.fetch(run.id, 0)) > 0 %>
+                  <span class="badge" title="<%= pluralize(artifact_count, "artifact") %>">&#128206; <%= artifact_count %></span>
+                <% end %>
+              </td>
               <td>
                 <% if run.progress_total > 0 %>
                   <div class="progress-container" style="height: 10px; width: 100px; display: inline-block; vertical-align: middle;">
@@ -65,7 +70,13 @@
                 <% end %>
               </td>
               <td><%= run.formatted_duration %></td>
-              <td><%= run.user_id.present? ? run.user_display : "&mdash;".html_safe %></td>
+              <td>
+                <% if run.user_id.present? %>
+                  <span class="cell-truncate-sm" title="<%= run.user_display %>"><%= run.user_display %></span>
+                <% else %>
+                  &mdash;
+                <% end %>
+              </td>
               <td><a href="<%= run_path(run) %>" class="btn btn-outline btn-sm">View</a></td>
             </tr>
           <% end %>
@@ -103,12 +114,17 @@
               <td><a href="<%= run_path(run) %>">#<%= run.id %></a></td>
               <td>
                 <% if run.task_exists? %>
-                  <a href="<%= job_path(id: run.task_class) %>"><%= run.task_title %></a>
+                  <a href="<%= job_path(id: run.task_class) %>" class="cell-truncate" title="<%= run.task_title %>"><%= run.task_title %></a>
                 <% else %>
-                  <span style="color: var(--text-muted);" title="Task class no longer exists"><%= run.task_class %></span>
+                  <span class="cell-truncate" style="color: var(--text-muted);" title="<%= run.task_class %> (task class no longer exists)"><%= run.task_class %></span>
                 <% end %>
               </td>
-              <td><span class="badge badge-<%= run.status %>"><%= run.status %></span></td>
+              <td>
+                <span class="badge badge-<%= run.status %>"><%= run.status %></span>
+                <% if (artifact_count = @artifact_counts.fetch(run.id, 0)) > 0 %>
+                  <span class="badge" title="<%= pluralize(artifact_count, "artifact") %>">&#128206; <%= artifact_count %></span>
+                <% end %>
+              </td>
               <td>
                 <% if run.progress_total > 0 %>
                   <%= run.progress_current %> / <%= run.progress_total %>
@@ -117,7 +133,13 @@
                 <% end %>
               </td>
               <td><%= run.formatted_duration %></td>
-              <td><%= run.user_id.present? ? run.user_display : "&mdash;".html_safe %></td>
+              <td>
+                <% if run.user_id.present? %>
+                  <span class="cell-truncate-sm" title="<%= run.user_display %>"><%= run.user_display %></span>
+                <% else %>
+                  &mdash;
+                <% end %>
+              </td>
               <td style="white-space: nowrap;"><%= run.created_at.strftime("%b %d, %Y %H:%M") %></td>
               <td><a href="<%= run_path(run) %>" class="btn btn-outline btn-sm">View</a></td>
             </tr>
@@ -132,22 +154,60 @@
   </div>
 </div>
 
-<%# Available Tasks %>
-<div class="dashboard-section">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-    <h2>Available Tasks</h2>
-    <a href="<%= jobs_path %>" class="btn btn-outline btn-sm">View All</a>
-  </div>
-  <div class="card" style="padding: 0; overflow: hidden;">
-    <% if @task_classes.any? %>
-      <% @task_classes.each do |task_class| %>
-        <%= render "maintenance_on_steroids/shared/task_list_item", task_class: task_class, active_count: @active_run_counts.fetch(task_class.name, 0) %>
-      <% end %>
-    <% else %>
-      <div class="empty-state">
-        <h3>No tasks found</h3>
-        <p>Create task classes in <code>app/maintenance/</code> that inherit from <code>MaintenanceOnSteroids::Task</code></p>
-      </div>
-    <% end %>
-  </div>
-</div>
+<script>
+(function() {
+  var REFRESH_INTERVAL = 2000;
+  var MAX_CONSECUTIVE_FAILURES = 5;
+  var consecutiveFailures = 0;
+  var timer = null;
+  var inFlight = null;
+
+  function teardown() {
+    if (timer !== null) { clearInterval(timer); timer = null; }
+    if (inFlight !== null) { inFlight.abort(); inFlight = null; }
+    document.removeEventListener("turbo:before-visit", teardown);
+    document.removeEventListener("turbo:before-cache", teardown);
+    window.removeEventListener("pagehide", teardown);
+  }
+
+  document.addEventListener("turbo:before-visit", teardown);
+  document.addEventListener("turbo:before-cache", teardown);
+  window.addEventListener("pagehide", teardown);
+
+  function refresh() {
+    if (document.hidden) { return; }
+    // Abort any still-in-flight refresh before starting a new one so slow
+    // responses can't pile up or land out of order.
+    if (inFlight !== null) { inFlight.abort(); }
+    var controller = new AbortController();
+    inFlight = controller;
+    fetch(window.location.href, { headers: { "Accept": "text/html" }, signal: controller.signal })
+      .then(function(res) {
+        if (!res.ok) { throw new Error("HTTP " + res.status); }
+        return res.text();
+      })
+      .then(function(html) {
+        inFlight = null;
+        consecutiveFailures = 0;
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        ["dashboard-stats", "active-runs-section"].forEach(function(id) {
+          var fresh = doc.getElementById(id);
+          var current = document.getElementById(id);
+          // Skip the swap if the user is interacting with something inside the
+          // target (e.g. a focused View/pause link) so it isn't ripped out.
+          if (current && fresh && !current.contains(document.activeElement)) {
+            current.innerHTML = fresh.innerHTML;
+          }
+        });
+      })
+      .catch(function(err) {
+        inFlight = null;
+        if (err && err.name === "AbortError") { return; }
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) { teardown(); }
+      });
+  }
+
+  timer = setInterval(refresh, REFRESH_INTERVAL);
+})();
+</script>

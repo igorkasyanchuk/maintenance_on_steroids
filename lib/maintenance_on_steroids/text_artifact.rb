@@ -6,7 +6,9 @@ module MaintenanceOnSteroids
 
     def initialize(record)
       @record = record
-      @value = record.data_text || ""
+      # dup so `<<`/`puts` don't mutate the record's own attribute string in
+      # place (that would make dirty? always false and corrupt the record).
+      @value = (record.data_text || "").dup
     end
 
     def value
@@ -32,7 +34,15 @@ module MaintenanceOnSteroids
     end
 
     def save!
-      @record.update!(data_text: @value)
+      @record.data_text = @value
+      @record.refresh_metadata!
+      @record.save!
+    end
+
+    # True when buffered text differs from what's persisted. Lets the proxy
+    # auto-flush only artifacts that were actually written.
+    def dirty?
+      @value != (@record.data_text || "")
     end
 
     def blank?

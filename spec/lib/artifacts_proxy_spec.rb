@@ -78,6 +78,112 @@ RSpec.describe MaintenanceOnSteroids::ArtifactsProxy do
     end
   end
 
+  describe "#flush!" do
+    it "persists dirty jsonb and text artifacts" do
+      jsonb_defn = MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:result, type: :jsonb, default: {})
+      text_defn = MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:summary, type: :text)
+      proxy = described_class.new(run, [jsonb_defn, text_defn])
+
+      proxy[:result]["foo"] = "bar"
+      proxy[:summary] << "hello"
+
+      expect { proxy.flush! }.to change(MaintenanceOnSteroids::Artifact, :count).by(2)
+      expect(run.artifacts.find_by(name: "result").data_jsonb["foo"]).to eq("bar")
+      expect(run.artifacts.find_by(name: "summary").data_text).to eq("hello")
+    end
+
+    it "does not create rows for artifacts that were only read (no phantom rows)" do
+      proxy = described_class.new(run, definitions)
+      proxy[:result] # read only, never written
+
+      expect { proxy.flush! }.not_to change(MaintenanceOnSteroids::Artifact, :count)
+    end
+
+    it "is a no-op when nothing was touched" do
+      proxy = described_class.new(run, definitions)
+      expect { proxy.flush! }.not_to change(MaintenanceOnSteroids::Artifact, :count)
+    end
+  end
+
+  describe "metadata" do
+    it "records entry count and byte size for jsonb on save" do
+      subject[:result]["a"] = 1
+      subject[:result]["b"] = 2
+      subject.save!(:result)
+
+      artifact = run.artifacts.find_by(name: "result")
+      expect(artifact.metadata["entries"]).to eq(2)
+      expect(artifact.metadata["bytes"]).to be > 0
+      expect(artifact.metadata["generated_at"]).to be_present
+    end
+
+    it "records line count for text on save" do
+      text_defn = MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:summary, type: :text)
+      proxy = described_class.new(run, [text_defn])
+      proxy[:summary].puts "one"
+      proxy[:summary].puts "two"
+      proxy.save!(:summary)
+
+      expect(run.artifacts.find_by(name: "summary").metadata["lines"]).to eq(2)
+    end
+
+    it "records byte size for blob on assignment" do
+      file_defn = MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:export, type: :file)
+      proxy = described_class.new(run, [file_defn])
+      proxy[:export] = "hello"
+
+      expect(run.artifacts.find_by(name: "export").metadata["bytes"]).to eq(5)
+    end
+  end
+
+  describe "method-style access" do
+    it "reads a declared artifact via a reader method" do
+      expect(subject.result).to be_a(MaintenanceOnSteroids::JsonbArtifact)
+      expect(subject.result.object_id).to eq(subject[:result].object_id)
+    end
+
+    it "writes via a setter method" do
+      subject.result = { "k" => "v" }
+      expect(run.artifacts.find_by(name: "result").data_jsonb).to eq({ "k" => "v" })
+    end
+
+    it "still raises NoMethodError for undeclared names" do
+      expect { subject.nope }.to raise_error(NoMethodError)
+    end
+
+    it "answers respond_to? for declared artifacts" do
+      expect(subject.respond_to?(:result)).to be(true)
+      expect(subject.respond_to?(:nope)).to be(false)
+    end
+  end
+
+  describe "csv type artifacts" do
+    let(:csv_run) { MaintenanceOnSteroids::Run.create!(task_class: "ExportProductsTask", status: "running") }
+    let(:csv_proxy) { described_class.new(csv_run, ExportProductsTask.artifact_definitions) }
+
+    it "returns a CsvArtifact on read" do
+      expect(csv_proxy[:export]).to be_a(MaintenanceOnSteroids::CsvArtifact)
+    end
+
+    it "appends rows and auto-flushes to a downloadable csv" do
+      csv_proxy[:export] << [1, "Alice", "SKU-1", 100, "draft"]
+      csv_proxy.flush!
+
+      record = csv_run.artifacts.find_by(name: "export")
+      expect(record.artifact_type).to eq("csv")
+      expect(record.file_name).to eq("export.csv")
+      expect(record.content_type).to eq("text/csv")
+      expect(record.data_blob).to include("id,name,sku,price_cents,status")
+      expect(record).to be_downloadable
+    end
+
+    it "accepts a full array of rows via direct assignment" do
+      csv_proxy[:export] = [[1, "Alice", "SKU-1", 100, "draft"]]
+      record = csv_run.artifacts.find_by(name: "export")
+      expect(record.data_blob).to eq("id,name,sku,price_cents,status\n1,Alice,SKU-1,100,draft\n")
+    end
+  end
+
   describe "file type artifacts" do
     let(:file_run) do
       MaintenanceOnSteroids::Run.create!(

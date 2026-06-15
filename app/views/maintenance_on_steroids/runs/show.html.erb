@@ -15,6 +15,9 @@
     <p class="subtitle"><%= task_title %></p>
   </div>
   <div class="btn-group">
+    <% if @task_class_obj %>
+      <a href="<%= source_job_path(id: @run.task_class) %>" class="btn btn-outline btn-sm">View Source</a>
+    <% end %>
     <% if @run.pausable? %>
       <%= button_to "Pause", pause_run_path(@run), class: "btn btn-warning btn-sm", form: { style: "display: inline;" } %>
     <% end %>
@@ -35,11 +38,18 @@
       <label>Status</label>
       <div class="value">
         <span id="status-badge" class="badge badge-<%= @run.status %>"><%= @run.status %></span>
+        <span id="auto-refresh" class="auto-refresh" hidden>
+          auto-refresh in <span id="auto-refresh-count"><%= 5 %></span>s
+        </span>
       </div>
     </div>
     <div class="info-item">
       <label>Duration</label>
       <div class="value" id="run-duration"><%= @run.formatted_duration %></div>
+    </div>
+    <div class="info-item" id="estimated-duration-item" <%= "hidden" unless @run.formatted_estimated_duration %>>
+      <label>Estimated (pending)</label>
+      <div class="value" id="estimated-duration"><%= @run.formatted_estimated_duration %></div>
     </div>
     <div class="info-item">
       <label>Started</label>
@@ -127,20 +137,43 @@
 
 <%# Output Artifacts Card %>
 <% output_artifacts = @run.output_artifacts %>
+<% artifact_defs = (@task_class_obj&.artifact_definitions || []).index_by { |d| d.name.to_s } %>
 <% if output_artifacts.any? %>
   <div class="card" style="margin-top: 16px;">
     <h3 style="margin-bottom: 12px;">Artifacts</h3>
     <% output_artifacts.each do |artifact| %>
+      <% defn = artifact_defs[artifact.name] %>
       <div class="artifact-card">
-        <span class="artifact-name"><%= artifact.name %></span>
-        <span class="artifact-type">&middot; <%= artifact.artifact_type %></span>
+        <span class="artifact-name"><%= defn&.label || artifact.name.titleize %></span>
+        <span class="artifact-type">&middot; <%= artifact.artifact_type %> &middot; <%= artifact.summary %></span>
+        <% if artifact.generated_at %>
+          <span class="artifact-type" title="<%= artifact.generated_at %>">&middot; <%= time_ago_in_words(artifact.generated_at) %> ago</span>
+        <% end %>
         <% if artifact.downloadable? %>
           <a href="<%= artifact_download_run_path(@run, artifact_id: artifact.id) %>" class="btn btn-outline btn-sm" style="margin-left: 8px;">Download</a>
+        <% end %>
+        <% if defn&.description.present? %>
+          <div class="artifact-desc"><%= defn.description %></div>
         <% end %>
         <% if artifact.artifact_type == "jsonb" && artifact.data_jsonb.present? %>
           <pre><%= JSON.pretty_generate(artifact.data_jsonb) %></pre>
         <% elsif artifact.artifact_type == "text" && artifact.data_text.present? %>
           <pre><%= artifact.data_text %></pre>
+        <% elsif artifact.artifact_type == "csv" && (rows = artifact.csv_rows).present? %>
+          <div style="overflow-x: auto;">
+            <table class="csv-preview">
+              <% rows.first(100).each_with_index do |row, i| %>
+                <tr>
+                  <% row.each do |cell| %>
+                    <% if i.zero? && defn&.headers %><th><%= cell %></th><% else %><td><%= cell %></td><% end %>
+                  <% end %>
+                </tr>
+              <% end %>
+            </table>
+          </div>
+          <% if rows.size > 100 %>
+            <div class="artifact-desc">Showing first 100 of <%= rows.size %> rows &mdash; download for the full file.</div>
+          <% end %>
         <% end %>
       </div>
     <% end %>
@@ -148,18 +181,29 @@
 <% end %>
 
 <%# Live polling script for active runs %>
-<% if @run.active? %>
+<%# cancelling is not in ACTIVE_STATUSES but still needs live updates + auto-refresh %>
+<% if @run.active? || @run.status == "cancelling" %>
 <script>
 (function() {
   var POLL_INTERVAL = 2000;
   var MAX_CONSECUTIVE_FAILURES = 5;
   var statusUrl = "<%= status_run_path(@run) %>";
+  var initialStatus = "<%= @run.status %>";
   var reloadStatuses = ["completed", "errored", "cancelled", "paused"];
+  // Transitional states waiting on the worker to acknowledge; the page
+  // auto-refreshes on a visible countdown until the state settles.
+  var transitionalStatuses = ["pausing", "cancelling"];
+  var AUTO_REFRESH_SECONDS = 5;
 
   var timer = null;
   var reloadTimer = null;
+  var countdownTimer = null;
   var consecutiveFailures = 0;
   var abortController = new AbortController();
+  // The poll is the single reload authority. Once it has scheduled a reload
+  // (settled state detected), the transitional countdown must not also fire a
+  // reload -- otherwise the page reloads twice.
+  var reloadScheduled = false;
 
   // Stop polling, pending reloads and in-flight fetches when leaving the
   // page (Turbo navigation or regular unload) so stale responses can't
@@ -167,9 +211,42 @@
   function teardown() {
     if (timer !== null) { clearInterval(timer); timer = null; }
     if (reloadTimer !== null) { clearTimeout(reloadTimer); reloadTimer = null; }
+    if (countdownTimer !== null) { clearInterval(countdownTimer); countdownTimer = null; }
     abortController.abort();
     document.removeEventListener("turbo:before-visit", teardown);
     window.removeEventListener("pagehide", teardown);
+  }
+
+  function startAutoRefreshCountdown() {
+    if (countdownTimer !== null) { return; }
+    var indicator = document.getElementById("auto-refresh");
+    var counter = document.getElementById("auto-refresh-count");
+    if (!indicator || !counter) { return; }
+    var remaining = AUTO_REFRESH_SECONDS;
+    counter.textContent = remaining;
+    indicator.hidden = false;
+    countdownTimer = setInterval(function() {
+      // Don't tick or reload in a background tab.
+      if (document.hidden) { return; }
+      // The poll already owns the reload; stand down to avoid a double reload.
+      if (reloadScheduled) {
+        stopAutoRefreshCountdown();
+        return;
+      }
+      remaining -= 1;
+      if (remaining <= 0) {
+        teardown();
+        window.location.reload();
+        return;
+      }
+      counter.textContent = remaining;
+    }, 1000);
+  }
+
+  function stopAutoRefreshCountdown() {
+    if (countdownTimer !== null) { clearInterval(countdownTimer); countdownTimer = null; }
+    var indicator = document.getElementById("auto-refresh");
+    if (indicator) { indicator.hidden = true; }
   }
 
   document.addEventListener("turbo:before-visit", teardown);
@@ -214,9 +291,29 @@
           duration.textContent = data.formatted_duration;
         }
 
-        if (reloadStatuses.indexOf(data.status) !== -1) {
+        var estimatedItem = document.getElementById("estimated-duration-item");
+        var estimated = document.getElementById("estimated-duration");
+        if (estimatedItem && estimated) {
+          if (data.formatted_estimated_duration) {
+            estimated.textContent = data.formatted_estimated_duration;
+            estimatedItem.hidden = false;
+          } else {
+            estimatedItem.hidden = true;
+          }
+        }
+
+        if (transitionalStatuses.indexOf(data.status) !== -1) {
+          startAutoRefreshCountdown();
+        } else {
+          stopAutoRefreshCountdown();
+        }
+
+        // Reload only on a status *change* into a settled state -- landing
+        // directly on e.g. a paused page must not trigger a reload loop.
+        if (data.status !== initialStatus && reloadStatuses.indexOf(data.status) !== -1) {
           clearInterval(timer);
           timer = null;
+          reloadScheduled = true;
           reloadTimer = setTimeout(function() { window.location.reload(); }, 500);
         }
       })
@@ -231,6 +328,11 @@
   }
 
   timer = setInterval(poll, POLL_INTERVAL);
+
+  <% if %w[pausing cancelling].include?(@run.status) %>
+  // Page landed in a transitional state -- start the countdown immediately.
+  startAutoRefreshCountdown();
+  <% end %>
 })();
 </script>
 <% end %>

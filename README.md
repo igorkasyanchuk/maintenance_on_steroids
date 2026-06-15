@@ -9,9 +9,11 @@ A powerful maintenance task runner for **Rails 8.1+** that leverages `ActiveJob:
 - **Collection & callable tasks** -- iterate over ActiveRecord relations or run one-off jobs
 - **Automatic resumption** -- cursor-based progress tracking survives Sidekiq restarts and pause/resume cycles without reprocessing records
 - **Rich DSL** -- typed form inputs, named artifacts, lifecycle callbacks, queue configuration, task metadata
-- **Live dashboard** -- real-time progress bars, status badges, run history, and source code viewer
-- **Artifacts** -- store JSON results, export CSV/binary files, downloadable from the UI
+- **Live dashboard** -- auto-refreshing stats and active runs, real-time progress bars, status badges, run history, and source code viewer
+- **Estimated time remaining** -- live ETA for pending records, extrapolated from the current processing rate
+- **Artifacts** -- store JSON results, export CSV/binary files, downloadable from the UI, with per-run indicators on the dashboard
 - **Pause / Resume / Cancel** -- safely interrupt long-running tasks mid-execution
+- **Instrumentation** -- `ActiveSupport::Notifications` events for every run lifecycle transition
 - **User tracking** -- records who triggered each run with configurable display
 - **Authentication** -- HTTP Basic, Devise integration, custom access procs
 - **Dark & light themes** -- toggle with one click, persisted in localStorage
@@ -232,8 +234,20 @@ The generated file is downloadable from the run's detail page in the UI.
 | Type | Storage | Use case |
 |------|---------|----------|
 | `:jsonb` | JSON column | Structured results, counters, logs |
-| `:file` | Binary blob | CSV exports, PDFs, images |
+| `:file` | Binary blob | PDFs, images, pre-rendered files |
 | `:text` | Text column | Plain text output |
+| `:csv` | Binary blob | Row-oriented exports, table-previewed in the UI |
+
+An unknown `type:` raises `ArgumentError` at load time, so typos surface immediately.
+
+**Declaration options** (all types): `label:` (human name shown in the UI, defaults to the humanized artifact name), `description:` (shown under the artifact on the run page), `content_type:` (download MIME -- otherwise inferred from `file_name`), plus `default:`, `file_name:`, and `headers:` (CSV).
+
+**Access** -- `artifacts[:name]` and method style are equivalent:
+
+```ruby
+artifacts[:result]["k"] = v
+artifacts.result["k"]  = v   # same thing, reads nicer
+```
 
 **JSONB artifacts** behave like a hash:
 
@@ -242,10 +256,24 @@ artifact :result, type: :jsonb, default: {}
 
 def process(user)
   user.update!(active: false)
-  artifacts[:result][user.id.to_s] = { deactivated: true }
-  artifacts[:result].save!
+  artifacts.result[user.id.to_s] = { deactivated: true }
 end
 ```
+
+**CSV artifacts** are append-oriented and render to a downloadable `.csv`:
+
+```ruby
+artifact :export, type: :csv, headers: %w[id name email], description: "All users"
+
+def call
+  User.find_each { |u| artifacts.export << [u.id, u.name, u.email] }
+  # auto-flushed on completion; previewed as a table on the run page
+end
+```
+
+**Auto-flush:** you don't need to call `artifacts[:x].save!` yourself. Any artifact written in memory is automatically persisted by the job when the run completes (after `after_complete` callbacks run, so a final aggregate computed there is captured) and when a run is paused or cancelled mid-flight (so in-progress output is never lost). Reads alone never create a record. You can still call `save!` explicitly if you want intermediate checkpoints.
+
+**Metadata:** every artifact records lightweight stats on save -- entry/line count, byte size, and a generated-at timestamp -- shown on the run page (`12 entries · 3.4 KB · 2 minutes ago`) without loading the full payload. Available on the model via `artifact.summary`, `artifact.byte_size`, and `artifact.generated_at`.
 
 **File artifacts** -- if `file_name` is omitted, it defaults to `task_class_name_YYYYMMDD_HHMMSS`:
 
@@ -430,16 +458,20 @@ The engine provides a full-featured web UI at your mounted path (default: `/main
 
 ### Pages
 
-- **Dashboard** -- stats overview, active runs, recent history, task list
-- **Tasks** -- all registered task classes
+- **Dashboard** -- stats overview, active runs, and recent history; runs with output artifacts show a 📎 indicator with the artifact count
+- **Tasks** -- all registered task classes, sortable by name (default) or last execution time; each row shows the last run's status and age, and never-executed tasks carry a "New" badge
 - **Task detail** -- task metadata, run history, "New Run" and "Source" buttons
 - **Source viewer** -- view the Ruby source code of any task class
 - **New Run** -- form with typed inputs to start a task
-- **Run detail** -- live progress bar, status, duration, parameters, artifacts, pause/resume/cancel controls
+- **Run detail** -- live progress bar, status, duration, estimated time remaining, parameters, artifacts, pause/resume/cancel controls, and a "View Source" shortcut
 
 ### Live Progress
 
-Active runs poll for status updates every 2 seconds. The progress bar, percentage, status badge, and duration update in real-time without page refresh.
+Active runs poll for status updates every 2 seconds. The progress bar, percentage, status badge, duration, and the **Estimated (pending)** time remaining (`2d 4h 12m 30s`-style, leading zero units omitted) update in real-time without page refresh.
+
+The dashboard auto-refreshes its stats and active-runs table every 2 seconds in the background (paused while the tab is hidden) -- no flash, no scroll jumps.
+
+While a run is in a transitional state (`pausing`, `cancelling`), the run page shows a visible auto-refresh countdown next to the status badge and reloads every few seconds until the worker settles the state.
 
 ### Theme
 
@@ -471,6 +503,34 @@ MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes)
 ```
 
 Pick a threshold comfortably larger than the time your slowest task needs to process a single record. `enqueued` and `paused` runs are never reaped.
+
+## Instrumentation
+
+Every run lifecycle transition emits an `ActiveSupport::Notifications` event in the `maintenance_on_steroids` namespace -- the same pattern as the `maintenance_tasks` gem:
+
+```ruby
+ActiveSupport::Notifications.subscribe("enqueued.maintenance_on_steroids") do |event|
+  run = event.payload[:run]
+  Rails.logger.info "Enqueued #{event.payload[:task_name]} (run ##{run.id})"
+end
+
+# Or subscribe to all events at once:
+ActiveSupport::Notifications.subscribe(/\.maintenance_on_steroids\z/) do |event|
+  StatsD.increment("maintenance.#{event.name.split('.').first}")
+end
+```
+
+| Event | Fired when |
+|-------|-----------|
+| `enqueued.maintenance_on_steroids` | A run is enqueued (initial enqueue and re-enqueue on resume) |
+| `started.maintenance_on_steroids` | The job starts executing for the first time (not on resumptions/retries) |
+| `paused.maintenance_on_steroids` | A pause request is honored by the worker |
+| `resumed.maintenance_on_steroids` | A paused run is resumed |
+| `cancelled.maintenance_on_steroids` | A run is cancelled (directly, or honored by the worker mid-run) |
+| `succeeded.maintenance_on_steroids` | A run completes successfully |
+| `errored.maintenance_on_steroids` | A run raises -- payload includes `error:` with the exception |
+
+Payload: `{ run:, task_name: }` (plus `error:` for `errored`).
 
 ## Development
 

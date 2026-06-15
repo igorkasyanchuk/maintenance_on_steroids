@@ -57,6 +57,54 @@ RSpec.describe MaintenanceOnSteroids::RunJob, type: :job do
     end
   end
 
+  describe "artifact auto-flush" do
+    # Task that writes an artifact during process but never calls save!
+    # or uses after_complete -- relies entirely on RunJob auto-flush.
+    def define_autoflush_task!
+      klass = Class.new(MaintenanceOnSteroids::Task) do
+        about { title "Auto Flush" }
+        artifact :seen, type: :jsonb, default: {}
+
+        def collection = User.all
+        def process(user) = artifacts[:seen][user.id.to_s] = user.name
+      end
+      stub_const("AutoFlushTask", klass)
+      MaintenanceOnSteroids::JobRegistry.register(klass)
+    end
+
+    it "persists artifacts written during process without an explicit save" do
+      create_users(3)
+      define_autoflush_task!
+      run = create_run(task_class: "AutoFlushTask", params: {})
+
+      described_class.perform_now(run.id)
+
+      artifact = run.artifacts.find_by(name: "seen", kind: "output")
+      expect(artifact).to be_present
+      expect(artifact.data_jsonb.size).to eq(3)
+    end
+
+    it "persists in-progress artifacts when the run is cancelled mid-flight" do
+      create_users(5)
+      define_autoflush_task!
+      run = create_run(task_class: "AutoFlushTask", params: {})
+
+      # Flip to cancelling after the first record is processed.
+      allow_any_instance_of(AutoFlushTask).to receive(:process).and_wrap_original do |orig, user|
+        orig.call(user)
+        run.update!(status: "cancelling") if run.reload.running?
+      end
+
+      described_class.perform_now(run.id)
+
+      run.reload
+      expect(run.status).to eq("cancelled")
+      artifact = run.artifacts.find_by(name: "seen", kind: "output")
+      expect(artifact).to be_present
+      expect(artifact.data_jsonb.size).to be >= 1
+    end
+  end
+
   describe "execution guards" do
     it "does nothing for a cancelled run" do
       create_users(1)

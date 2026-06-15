@@ -5,6 +5,20 @@ module MaintenanceOnSteroids
     def index
       @task_classes = MaintenanceOnSteroids.task_classes
       @active_run_counts = MaintenanceOnSteroids::Run.active.group(:task_class).count
+      # Fetch only the latest run per task_class (MAX(id) per group), avoiding
+      # loading every historical run. Works on both SQLite and Postgres.
+      names = @task_classes.map(&:name)
+      @last_runs = MaintenanceOnSteroids::Run
+                   .where(id: MaintenanceOnSteroids::Run.where(task_class: names).group(:task_class).select("MAX(id)"))
+                   .index_by(&:task_class)
+      @sort = params[:sort] == "last_run" ? "last_run" : "name"
+      @task_classes =
+        if @sort == "last_run"
+          # Most recently executed first; never-executed tasks at the bottom.
+          @task_classes.sort_by { |tc| @last_runs[tc.name]&.created_at || Time.at(0) }.reverse
+        else
+          @task_classes.sort_by { |tc| tc.task_title.to_s.downcase }
+        end
     end
 
     def show

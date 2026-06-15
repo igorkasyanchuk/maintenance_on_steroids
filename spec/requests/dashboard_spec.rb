@@ -31,11 +31,6 @@ RSpec.describe "Dashboard", type: :request do
       expect(response.body).to include("##{run.id}")
     end
 
-    it "shows available tasks" do
-      get "/maintenance"
-      expect(response.body).to include("UpdateUsersTask")
-    end
-
     it "shows runs for deleted task classes" do
       run = MaintenanceOnSteroids::Run.create!(task_class: "DeletedOldTask", status: "completed")
       get "/maintenance"

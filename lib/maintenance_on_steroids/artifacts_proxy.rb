@@ -18,6 +18,7 @@ module MaintenanceOnSteroids
 
       record = find_or_create_record(name, definition)
       write_value(record, definition, value)
+      record.refresh_metadata!
       begin
         record.save!
       rescue ActiveRecord::RecordNotUnique
@@ -26,6 +27,7 @@ module MaintenanceOnSteroids
         record = @run.artifacts.find_by!(name: name.to_s, kind: "output")
         record.artifact_type = definition.storage_type.to_s
         write_value(record, definition, value)
+        record.refresh_metadata!
         record.save!
       end
       @cache[name] = wrap(record, definition)
@@ -38,9 +40,35 @@ module MaintenanceOnSteroids
     end
 
     def save_all!
-      @cache.each do |name, cached|
-        save!(name)
+      @cache.each_key { |name| save!(name) }
+    end
+
+    # Persists only artifacts whose in-memory contents were actually written
+    # (dirty), so merely reading an artifact never creates a phantom row.
+    # Called automatically by RunJob at completion and on pause/cancel.
+    def flush!
+      @cache.each_value do |cached|
+        cached.save! if cached.respond_to?(:dirty?) && cached.dirty?
       end
+    end
+
+    # Method-style access for declared artifacts so call sites read naturally:
+    #   artifacts.report << row      # instead of artifacts[:report] << row
+    #   artifacts.result["k"] = v
+    #   artifacts.summary = "..."
+    def method_missing(method, *args)
+      key = method.to_s.chomp("=").to_sym
+      return super unless @definitions.key?(key)
+
+      if method.to_s.end_with?("=")
+        self[key] = args.first
+      else
+        self[key]
+      end
+    end
+
+    def respond_to_missing?(method, include_private = false)
+      @definitions.key?(method.to_s.chomp("=").to_sym) || super
     end
 
     private
@@ -54,17 +82,23 @@ module MaintenanceOnSteroids
       # Reads must not INSERT: build the record lazily and persist it only
       # on first save! / assignment. (update! on a new record saves it.)
       record = @run.artifacts.find_by(name: name.to_s, kind: "output")
-      record ||= @run.artifacts.new(
+      record ||= build_record(name, definition, storage)
+
+      wrap(record, definition)
+    end
+
+    def build_record(name, definition, storage)
+      record = @run.artifacts.new(
         name: name.to_s,
         kind: "output",
         artifact_type: storage.to_s,
         data_jsonb: storage == :jsonb ? (definition.default || {}) : nil,
         data_text: storage == :text ? (definition.default || "") : nil,
-        data_blob: storage == :blob ? definition.default : nil,
-        file_name: definition.file_name
+        data_blob: %i[blob csv].include?(storage) ? definition.default : nil,
+        file_name: definition.file_name || definition.default_file_name
       )
-
-      wrap(record, definition)
+      record.content_type = definition.resolved_content_type if storage == :csv
+      record
     end
 
     def find_or_create_record(name, definition)
@@ -87,8 +121,21 @@ module MaintenanceOnSteroids
         end
         # Set file_name: explicit from DSL > already set > auto-generated default
         record.file_name ||= definition.file_name || default_file_name
+        record.content_type ||= definition.resolved_content_type(record.file_name)
+      when :csv
+        record.data_blob = value.is_a?(String) ? value : render_csv(definition, value)
+        record.file_name   ||= definition.file_name || definition.default_file_name
+        record.content_type ||= definition.resolved_content_type || "text/csv"
       when :text
         record.data_text = value.to_s
+      end
+    end
+
+    def render_csv(definition, rows)
+      require "csv"
+      CSV.generate do |csv|
+        csv << definition.headers if definition.headers
+        Array(rows).each { |row| csv << Array(row) }
       end
     end
 
@@ -98,6 +145,8 @@ module MaintenanceOnSteroids
         JsonbArtifact.new(record)
       when :text
         TextArtifact.new(record)
+      when :csv
+        CsvArtifact.new(record, headers: definition.headers)
       when :blob
         record.data_blob
       end

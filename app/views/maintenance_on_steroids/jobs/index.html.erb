@@ -3,12 +3,17 @@
     <h1>Maintenance Tasks</h1>
     <p class="subtitle">Available tasks in your application</p>
   </div>
+  <div class="sort-toggle">
+    <span class="sort-label">Sort:</span>
+    <a href="<%= jobs_path %>" class="<%= "active" if @sort == "name" %>">Name</a>
+    <a href="<%= jobs_path(sort: "last_run") %>" class="<%= "active" if @sort == "last_run" %>">Last run</a>
+  </div>
 </div>
 
 <div class="card" style="padding: 0; overflow: hidden;">
   <% if @task_classes.any? %>
     <% @task_classes.each do |task_class| %>
-      <%= render "maintenance_on_steroids/shared/task_list_item", task_class: task_class, active_count: @active_run_counts.fetch(task_class.name, 0) %>
+      <%= render "maintenance_on_steroids/shared/task_list_item", task_class: task_class, active_count: @active_run_counts.fetch(task_class.name, 0), last_run: @last_runs[task_class.name] %>
     <% end %>
   <% else %>
     <div class="empty-state">

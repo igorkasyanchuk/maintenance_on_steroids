@@ -49,6 +49,13 @@ module MaintenanceOnSteroids
             Rails.logger.warn "[MaintenanceOnSteroids] Failed to eager load tasks: #{e.message}"
           end
 
+          # eager_load_dir is a no-op for constants Zeitwerk already loaded,
+          # so after a reset! (tests, code reload) the inherited-hook
+          # registrations are gone. Sweep descendants to re-register them.
+          MaintenanceOnSteroids::Task.descendants.each do |klass|
+            register(klass) if klass.name
+          end
+
           @loaded = true
         end
       end
