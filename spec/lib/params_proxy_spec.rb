@@ -133,6 +133,9 @@ RSpec.describe MaintenanceOnSteroids::ParamsProxy do
         ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
           expect(scalar.file_name(:name)).to be_nil
           expect(scalar.content_type(:name)).to be_nil
+          # A key not declared as a form input at all also short-circuits.
+          expect(scalar.file_name(:nonexistent)).to be_nil
+          expect(scalar.content_type(:nonexistent)).to be_nil
         end
         expect(queries).to eq(0)
       end

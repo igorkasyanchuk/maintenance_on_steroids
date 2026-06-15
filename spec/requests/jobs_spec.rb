@@ -131,5 +131,12 @@ RSpec.describe "Jobs", type: :request do
       get "/maintenance/jobs/UpdateUsersTask/source"
       expect(response.body).to include("update_users_task.rb")
     end
+
+    it "pins the highlight.js CDN script with a Subresource Integrity hash" do
+      get "/maintenance/jobs/UpdateUsersTask/source"
+      # A future template edit that drops the attribute (or a version bump that
+      # forgets to recompute the hash) regresses the CDN supply-chain guard.
+      expect(response.body).to match(/highlight\.min\.js"\s+integrity="sha384-/)
+    end
   end
 end

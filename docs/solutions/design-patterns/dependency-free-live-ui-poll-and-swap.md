@@ -63,8 +63,12 @@ function refresh() {
       var doc = new DOMParser().parseFromString(html, "text/html");   // 3. parse to DOM
       TARGET_IDS.forEach(function(id) {
         var fresh = doc.getElementById(id), current = document.getElementById(id);
-        // 4. swap innerHTML, but skip if the user is focused inside this target
-        if (current && fresh && !current.contains(document.activeElement)) {
+        // 4. swap innerHTML, but skip a no-op swap (markup unchanged) AND skip
+        //    if the user is focused inside this target. The equality check
+        //    avoids needless DOM churn and shrinks the window in which a swap
+        //    could detach a control the user is mid-click on.
+        if (current && fresh && current.innerHTML !== fresh.innerHTML &&
+            !current.contains(document.activeElement)) {
           current.innerHTML = fresh.innerHTML;
         }
       });
@@ -93,6 +97,23 @@ function teardown() {
 ```
 
 The `turbo:before-*` listeners are **defensive no-ops** — those events never fire in a non-Turbo host, but registering them means the partial drops into a Turbo host app without leaking stacked intervals across Drive navigations. Nothing in the partial requires Turbo.
+
+**bfcache re-arm (`pageshow`)** — `pagehide` fires when a page enters the back/forward cache, so teardown runs and the poller stops. But a bfcache **restore does not re-execute inline scripts**, so without a re-arm the poller stays dead after the user navigates Back. Wrap setup in a `start()` (guarded by `timer !== null` so it's idempotent) and re-arm on restore:
+
+```javascript
+function start() {
+  if (timer !== null) { return; }      // already polling
+  document.addEventListener("turbo:before-visit", teardown);
+  document.addEventListener("turbo:before-cache", teardown);
+  window.addEventListener("pagehide", teardown);
+  timer = setInterval(refresh, REFRESH_INTERVAL);
+}
+// Inline scripts don't re-run on bfcache restore; re-arm here.
+window.addEventListener("pageshow", function(e) { if (e.persisted) { start(); } });
+start();
+```
+
+The same "scripts don't re-run on bfcache restore" insight applies to **any** inline behavior bound on load, not just pollers — e.g. a delegated click handler bound once must re-bind on `pageshow`. A poller whose page carries fine-grained state that may have advanced while cached can instead do `if (e.persisted) location.reload()` on restore (the engine's `runs/show` status poller takes this route); `_auto_refresh` re-arms in place because its targets re-render from the same page fetch.
 
 **Sentinel self-terminate** — render a hidden marker only while there's active work, and the poller stops on its own once it's gone:
 

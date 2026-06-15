@@ -23,7 +23,7 @@ maintenance_on_steroids/
 │   │   ├── job_registry.rb           # Task class discovery and registration
 │   │   ├── instrumentation.rb       # ActiveSupport::Notifications lifecycle events (guarded via safe_instrument)
 │   │   ├── form_dsl.rb              # Typed form input builder (8+ input types incl. :blob file upload)
-│   │   ├── artifact_dsl.rb          # Artifact definition (jsonb, file, text, csv; reserved-name guard)
+│   │   ├── artifact_dsl.rb          # Artifact definition (jsonb, file, text, csv; reserved-name guard auto-derived from ArtifactsProxy methods)
 │   │   ├── about_dsl.rb             # Task metadata (title, description, owner)
 │   │   ├── job_dsl.rb               # Job configuration (queue, priority)
 │   │   ├── callbacks_dsl.rb         # Lifecycle callbacks
@@ -140,4 +140,4 @@ The test suite covers cursor resumption, pause/resume/cancel flows, duplicate pr
 - Task DSL modules are mixed into `MaintenanceOnSteroids::Task` via `ActiveSupport::Concern`.
 - Controllers use engine-scoped routes and authentication.
 - The engine does **not** depend on Turbo/Hotwire/Stimulus — plain ERB + small inline vanilla-JS scripts.
-- Real-time updates use the shared `_auto_refresh` partial: a `setInterval` poll that fetches the page and swaps named element ids in place (no full reload), pausing in hidden tabs and stopping when no active runs remain. Teardown runs on `pagehide` (normal navigation); `turbo:before-visit`/`turbo:before-cache` listeners are registered as a bonus for host apps that happen to use Turbo, but nothing here requires it. Run history paginates via the `_pager` partial. The source viewer optionally syntax-highlights Ruby via a highlight.js CDN (degrades to plain text if unavailable).
+- Real-time updates use the shared `_auto_refresh` partial: a `setInterval` poll that fetches the page and swaps named element ids in place (no full reload), pausing in hidden tabs and stopping when no active runs remain. Teardown runs on `pagehide` (normal navigation); `turbo:before-visit`/`turbo:before-cache` listeners are registered as a bonus for host apps that happen to use Turbo, but nothing here requires it. A `pageshow` listener re-arms the poller when a page is restored from the back/forward cache (bfcache), since inline scripts don't re-run on restore; the run-detail poller instead does a full reload to pick up state that changed while cached. Run history paginates via the `_pager` partial (the caller computes `total_pages`). The source viewer optionally syntax-highlights Ruby via a highlight.js CDN, SRI-pinned (recompute the `integrity=` hash in `source.html.erb` when bumping `hljs_version`); degrades to plain text if the CDN is unreachable.
