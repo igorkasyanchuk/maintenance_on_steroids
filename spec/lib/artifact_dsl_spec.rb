@@ -6,11 +6,19 @@ RSpec.describe MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition do
       .to raise_error(ArgumentError, /Unknown artifact type :json/)
   end
 
-  it "raises when the name collides with a reserved ArtifactsProxy method" do
-    %i[save save! save_all! flush!].each do |reserved|
-      expect { described_class.new(reserved) }
-        .to raise_error(ArgumentError, /reserved/)
+  it "raises for every name that collides with a real ArtifactsProxy method" do
+    reserved = MaintenanceOnSteroids::ArtifactsProxy.public_instance_methods(false) - %i([] []=)
+    expect(reserved).to include(:save, :save!, :save_all!, :flush!) # guards against an empty/garbage list
+
+    reserved.each do |name|
+      expect { described_class.new(name) }
+        .to raise_error(ArgumentError, /reserved/), "expected #{name.inspect} to be reserved"
     end
+  end
+
+  it "accepts a name that is not a real ArtifactsProxy method" do
+    expect { described_class.new(:result) }.not_to raise_error
+    expect { described_class.new(:flush) }.not_to raise_error # no ArtifactsProxy#flush exists
   end
 
   it "accepts every valid type" do

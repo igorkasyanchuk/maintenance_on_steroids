@@ -6,9 +6,14 @@ module MaintenanceOnSteroids
 
     class ArtifactDefinition
       VALID_TYPES = %i[jsonb file text csv].freeze
+
       # Names that would collide with real ArtifactsProxy methods, breaking
-      # method-style access (`artifacts.<name>`). Reject them at load time.
-      RESERVED_NAMES = %i[save save! save_all! flush flush!].freeze
+      # method-style access (`artifacts.<name>`). Derived from the proxy's own
+      # public methods (minus the `[]`/`[]=` operators, which can't be artifact
+      # names) so the guard can't drift as proxy methods are added or renamed.
+      def self.reserved_names
+        ArtifactsProxy.public_instance_methods(false) - %i([] []=)
+      end
 
       attr_reader :name, :type, :default, :file_name, :label, :description, :headers, :content_type
 
@@ -21,7 +26,7 @@ module MaintenanceOnSteroids
                 "Unknown artifact type #{@type.inspect} for artifact #{@name.inspect}. " \
                 "Valid types: #{VALID_TYPES.join(', ')}"
         end
-        if RESERVED_NAMES.include?(@name)
+        if self.class.reserved_names.include?(@name)
           raise ArgumentError,
                 "Artifact name #{@name.inspect} is reserved (conflicts with ArtifactsProxy##{@name}). " \
                 "Choose a different name."

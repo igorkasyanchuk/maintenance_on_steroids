@@ -20,13 +20,20 @@ module MaintenanceOnSteroids
       end
     end
 
-    # Original filename of an uploaded file input (nil if none uploaded).
+    # Original filename of an uploaded file input (nil if none uploaded, or if
+    # the key isn't a declared blob input -- scalar inputs have no input
+    # artifact, so don't waste a query looking one up).
     def file_name(key)
+      return nil unless @form_inputs[key.to_sym]&.blob?
+
       input_artifact(key)&.file_name
     end
 
-    # Declared MIME type of an uploaded file input (nil if none uploaded).
+    # Declared MIME type of an uploaded file input (nil if none uploaded, or if
+    # the key isn't a declared blob input).
     def content_type(key)
+      return nil unless @form_inputs[key.to_sym]&.blob?
+
       input_artifact(key)&.content_type
     end
 

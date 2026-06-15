@@ -10,10 +10,11 @@
   </div>
 </div>
 
+<% any_active = @active_run_counts.values.sum.positive? %>
 <div class="card" style="padding: 0; overflow: hidden;" id="jobs-list">
   <%# Sentinel: present only while a task is active. The poller swaps #jobs-list
       and stops once a refresh no longer contains this marker. %>
-  <% if @active_run_counts.values.sum.positive? %><span id="mos-active-sentinel" hidden></span><% end %>
+  <% if any_active %><span id="mos-active-sentinel" hidden></span><% end %>
   <% if @task_classes.any? %>
     <% @task_classes.each do |task_class| %>
       <%= render "maintenance_on_steroids/shared/task_list_item", task_class: task_class, active_count: @active_run_counts.fetch(task_class.name, 0), last_run: @last_runs[task_class.name] %>
@@ -28,7 +29,7 @@
 
 <%# Live-refresh the task list while any task is in progress (active badges and
     last-run ages update without a full reload), mirroring the dashboard. %>
-<% if @active_run_counts.values.sum.positive? %>
+<% if any_active %>
   <%= render "maintenance_on_steroids/shared/auto_refresh",
              target_ids: ["jobs-list"], stop_when_gone: "mos-active-sentinel" %>
 <% end %>

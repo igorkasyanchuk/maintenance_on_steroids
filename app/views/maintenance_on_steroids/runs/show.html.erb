@@ -188,9 +188,6 @@
   <%# Copy text/jsonb artifact contents (the sibling <pre>) to the clipboard. %>
   <script>
   (function() {
-    if (window.__mosArtifactCopyBound) { return; }
-    window.__mosArtifactCopyBound = true;
-
     function flash(btn) {
       var label = btn.getAttribute("data-copy-label") || "Copy";
       btn.textContent = "Copied!";
@@ -222,18 +219,27 @@
         fallbackCopy(text, btn);
       }
     }
-    document.addEventListener("click", onClick);
+    function bind() {
+      if (window.__mosArtifactCopyBound) { return; }
+      window.__mosArtifactCopyBound = true;
+      document.addEventListener("click", onClick);
+      document.addEventListener("turbo:before-visit", cleanup);
+      window.addEventListener("pagehide", cleanup);
+    }
 
     // Remove the delegated listener and clear the bind flag on Turbo
-    // navigation so listeners don't accumulate across run pages.
+    // navigation / unload so listeners don't accumulate across run pages.
     function cleanup() {
       document.removeEventListener("click", onClick);
       document.removeEventListener("turbo:before-visit", cleanup);
       window.removeEventListener("pagehide", cleanup);
       window.__mosArtifactCopyBound = false;
     }
-    document.addEventListener("turbo:before-visit", cleanup);
-    window.addEventListener("pagehide", cleanup);
+
+    // bfcache restore doesn't re-run this script, and cleanup ran on pagehide,
+    // so re-bind when the page is restored from the back/forward cache.
+    window.addEventListener("pageshow", bind);
+    bind();
   })();
   </script>
 <% end %>
@@ -311,6 +317,12 @@
   document.addEventListener("turbo:before-visit", teardown);
   document.addEventListener("turbo:before-cache", teardown);
   window.addEventListener("pagehide", teardown);
+
+  // bfcache restore doesn't re-run this script; the poller was torn down on
+  // pagehide. The run may have advanced while away, so reload for fresh state.
+  window.addEventListener("pageshow", function(e) {
+    if (e.persisted) { window.location.reload(); }
+  });
 
   function showPollingStopped() {
     var text = document.getElementById("progress-text");

@@ -25,7 +25,12 @@
   <%# Optional Ruby syntax highlighting via highlight.js (CDN). If the CDN is
       unreachable, hljs is undefined and the plain line view above is left as-is. %>
   <link id="hljs-theme" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" crossorigin="anonymous"></script>
+  <%# Subresource Integrity pins the exact bytes of this highlight.js build: a
+      compromised or MITM'd CDN serving anything else is refused by the browser
+      (this is an admin surface). Recompute the hash if the @version changes. %>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"
+          integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
+          crossorigin="anonymous"></script>
   <script>
   (function() {
     if (typeof hljs === "undefined") { return; }

@@ -22,10 +22,6 @@
     window.removeEventListener("pagehide", teardown);
   }
 
-  document.addEventListener("turbo:before-visit", teardown);
-  document.addEventListener("turbo:before-cache", teardown);
-  window.addEventListener("pagehide", teardown);
-
   function refresh() {
     if (document.hidden) { return; }
     // Abort any still-in-flight refresh before starting a new one so slow
@@ -45,11 +41,15 @@
         TARGET_IDS.forEach(function(id) {
           var fresh = doc.getElementById(id);
           var current = document.getElementById(id);
-          // Skip the swap if the user is interacting with something inside the
-          // target (e.g. a focused View/pause link) so it isn't ripped out.
-          // (teardown aborts the in-flight fetch, so this .then never runs
-          // after teardown -- no detached-node guard needed.)
-          if (current && fresh && !current.contains(document.activeElement)) {
+          // Only swap when the markup actually changed -- the common case
+          // (nothing changed) skips the swap, avoiding needless DOM churn and
+          // shrinking the window in which a swap could detach a control the
+          // user is mid-click on. Also skip if the user is interacting with
+          // something inside the target (e.g. a focused View/pause link) so it
+          // isn't ripped out. (teardown aborts the in-flight fetch, so this
+          // .then never runs after teardown -- no detached-node guard needed.)
+          if (current && fresh && current.innerHTML !== fresh.innerHTML &&
+              !current.contains(document.activeElement)) {
             current.innerHTML = fresh.innerHTML;
           }
         });
@@ -65,6 +65,21 @@
       });
   }
 
-  timer = setInterval(refresh, REFRESH_INTERVAL);
+  function start() {
+    if (timer !== null) { return; } // already polling
+    document.addEventListener("turbo:before-visit", teardown);
+    document.addEventListener("turbo:before-cache", teardown);
+    window.addEventListener("pagehide", teardown);
+    timer = setInterval(refresh, REFRESH_INTERVAL);
+  }
+
+  // When a page is restored from the back/forward (bfcache), inline scripts are
+  // NOT re-executed, so teardown (fired on pagehide) would leave polling dead.
+  // Re-arm here. This listener is intentionally never removed by teardown.
+  window.addEventListener("pageshow", function(e) {
+    if (e.persisted) { consecutiveFailures = 0; start(); }
+  });
+
+  start();
 })();
 </script>

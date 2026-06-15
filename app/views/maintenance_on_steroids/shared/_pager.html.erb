@@ -1,9 +1,8 @@
 <%# Simple prev/next pager (no gem). Locals:
-      page      -- current 1-based page
-      per_page  -- rows per page
-      total     -- total row count
-      url_proc  -- Integer page -> path (e.g. ->(n) { job_path(id: name, page: n) }) %>
-<% total_pages = [(total.to_f / per_page).ceil, 1].max %>
+      page        -- current 1-based page
+      total_pages -- total page count (computed by the caller; single source of truth)
+      total       -- total row count
+      url_proc    -- Integer page -> path (e.g. ->(n) { job_path(id: name, page: n) }) %>
 <% if total_pages > 1 %>
   <div class="pager">
     <% if page > 1 %>

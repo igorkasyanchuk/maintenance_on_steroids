@@ -123,6 +123,19 @@ RSpec.describe MaintenanceOnSteroids::ParamsProxy do
         end
         expect(queries).to eq(0)
       end
+
+      it "returns nil without querying for a non-blob (scalar) input" do
+        scalar_inputs = [MaintenanceOnSteroids::FormDsl::InputDefinition.new(:name, type: :string)]
+        scalar = described_class.new(run, scalar_inputs)
+
+        queries = 0
+        callback = ->(*, payload) { queries += 1 unless payload[:name] == "SCHEMA" }
+        ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+          expect(scalar.file_name(:name)).to be_nil
+          expect(scalar.content_type(:name)).to be_nil
+        end
+        expect(queries).to eq(0)
+      end
     end
   end
 
