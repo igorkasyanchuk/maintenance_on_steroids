@@ -156,9 +156,15 @@
           <div class="artifact-desc"><%= defn.description %></div>
         <% end %>
         <% if artifact.artifact_type == "jsonb" && artifact.data_jsonb.present? %>
-          <pre><%= JSON.pretty_generate(artifact.data_jsonb) %></pre>
+          <div class="artifact-pre-wrap">
+            <button type="button" class="btn btn-outline btn-sm copy-artifact-btn artifact-copy-overlay" data-copy-label="Copy">Copy</button>
+            <pre><%= JSON.pretty_generate(artifact.data_jsonb) %></pre>
+          </div>
         <% elsif artifact.artifact_type == "text" && artifact.data_text.present? %>
-          <pre><%= artifact.data_text %></pre>
+          <div class="artifact-pre-wrap">
+            <button type="button" class="btn btn-outline btn-sm copy-artifact-btn artifact-copy-overlay" data-copy-label="Copy">Copy</button>
+            <pre><%= artifact.data_text %></pre>
+          </div>
         <% elsif artifact.artifact_type == "csv" && (rows = artifact.csv_rows).present? %>
           <div style="overflow-x: auto;">
             <table class="csv-preview">
@@ -178,6 +184,58 @@
       </div>
     <% end %>
   </div>
+
+  <%# Copy text/jsonb artifact contents (the sibling <pre>) to the clipboard. %>
+  <script>
+  (function() {
+    if (window.__mosArtifactCopyBound) { return; }
+    window.__mosArtifactCopyBound = true;
+
+    function flash(btn) {
+      var label = btn.getAttribute("data-copy-label") || "Copy";
+      btn.textContent = "Copied!";
+      setTimeout(function() { btn.textContent = label; }, 1500);
+    }
+
+    function fallbackCopy(text, btn) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); flash(btn); } catch (e) { /* no-op */ }
+      document.body.removeChild(ta);
+    }
+
+    function onClick(e) {
+      var btn = e.target.closest && e.target.closest(".copy-artifact-btn");
+      if (!btn) { return; }
+      var card = btn.closest(".artifact-card");
+      var pre = card && card.querySelector("pre");
+      if (!pre) { return; }
+      var text = pre.textContent;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() { flash(btn); })
+          .catch(function() { fallbackCopy(text, btn); });
+      } else {
+        fallbackCopy(text, btn);
+      }
+    }
+    document.addEventListener("click", onClick);
+
+    // Remove the delegated listener and clear the bind flag on Turbo
+    // navigation so listeners don't accumulate across run pages.
+    function cleanup() {
+      document.removeEventListener("click", onClick);
+      document.removeEventListener("turbo:before-visit", cleanup);
+      window.removeEventListener("pagehide", cleanup);
+      window.__mosArtifactCopyBound = false;
+    }
+    document.addEventListener("turbo:before-visit", cleanup);
+    window.addEventListener("pagehide", cleanup);
+  })();
+  </script>
 <% end %>
 
 <%# Live polling script for active runs %>

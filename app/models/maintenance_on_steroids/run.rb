@@ -11,7 +11,7 @@ module MaintenanceOnSteroids
     validates :task_class, presence: true
     validates :status, inclusion: { in: STATUSES }
 
-    scope :recent, -> { order(created_at: :desc) }
+    scope :recent, -> { order(created_at: :desc, id: :desc) }
     scope :active, -> { where(status: ACTIVE_STATUSES) }
 
     STATUSES.each do |s|

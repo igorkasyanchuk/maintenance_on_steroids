@@ -67,7 +67,12 @@
         <% @runs.each do |run| %>
           <tr>
             <td><a href="<%= run_path(run) %>">#<%= run.id %></a></td>
-            <td><span class="badge badge-<%= run.status %>"><%= run.status %></span></td>
+            <td>
+              <span class="badge badge-<%= run.status %>"><%= run.status %></span>
+              <% if (artifact_count = @artifact_counts.fetch(run.id, 0)) > 0 %>
+                <span class="badge" title="<%= pluralize(artifact_count, "artifact") %>">&#128206; <%= artifact_count %></span>
+              <% end %>
+            </td>
             <td>
               <% if run.progress_total > 0 %>
                 <%= run.progress_current %> / <%= run.progress_total %> (<%= run.progress_percentage %>%)
@@ -96,3 +101,7 @@
     </div>
   <% end %>
 </div>
+
+<%= render "maintenance_on_steroids/shared/pager",
+           page: @page, per_page: @per_page, total: @total_runs,
+           url_proc: ->(n) { job_path(id: @task_class.name, page: n) } %>

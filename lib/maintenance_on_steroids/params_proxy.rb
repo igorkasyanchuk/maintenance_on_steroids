@@ -12,15 +12,22 @@ module MaintenanceOnSteroids
       input = @form_inputs[key]
 
       if input&.blob?
-        return @blob_cache[key] if @blob_cache.key?(key)
-
-        artifact = @run.artifacts.find_by(name: key.to_s, kind: "input")
-        @blob_cache[key] = artifact&.data_blob
+        input_artifact(key)&.data_blob
       else
         value = @scalar_data[key]
         value = input.default if value.nil? && input
         cast_value(value, input&.type)
       end
+    end
+
+    # Original filename of an uploaded file input (nil if none uploaded).
+    def file_name(key)
+      input_artifact(key)&.file_name
+    end
+
+    # Declared MIME type of an uploaded file input (nil if none uploaded).
+    def content_type(key)
+      input_artifact(key)&.content_type
     end
 
     def to_h
@@ -41,6 +48,15 @@ module MaintenanceOnSteroids
     end
 
     private
+
+    # The "input" artifact backing a file input, looked up once and cached
+    # (including a nil result, so a missing upload isn't re-queried).
+    def input_artifact(key)
+      key = key.to_sym
+      return @blob_cache[key] if @blob_cache.key?(key)
+
+      @blob_cache[key] = @run.artifacts.find_by(name: key.to_s, kind: "input")
+    end
 
     def cast_value(value, type)
       return value if value.nil?

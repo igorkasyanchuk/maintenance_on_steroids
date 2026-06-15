@@ -89,6 +89,40 @@ RSpec.describe MaintenanceOnSteroids::ParamsProxy do
         end
         expect(queries).to eq(0)
       end
+
+      it "returns file_name and content_type from the uploaded artifact" do
+        run.artifacts.create!(name: "csv", kind: "input", artifact_type: "blob",
+                              data_blob: "x", file_name: "people.csv", content_type: "text/csv")
+        expect(blob_proxy.file_name(:csv)).to eq("people.csv")
+        expect(blob_proxy.content_type(:csv)).to eq("text/csv")
+      end
+
+      it "returns nil file_name/content_type when nothing was uploaded (cached)" do
+        expect(blob_proxy.file_name(:csv)).to be_nil
+        expect(blob_proxy.content_type(:csv)).to be_nil
+
+        queries = 0
+        callback = ->(*, payload) { queries += 1 unless payload[:name] == "SCHEMA" }
+        ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+          blob_proxy.file_name(:csv)
+          blob_proxy.content_type(:csv)
+        end
+        expect(queries).to eq(0)
+      end
+
+      it "shares one query across [], file_name and content_type" do
+        run.artifacts.create!(name: "csv", kind: "input", artifact_type: "blob",
+                              data_blob: "x", file_name: "a.csv", content_type: "text/csv")
+        blob_proxy[:csv] # primes the cache
+
+        queries = 0
+        callback = ->(*, payload) { queries += 1 unless payload[:name] == "SCHEMA" }
+        ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+          blob_proxy.file_name(:csv)
+          blob_proxy.content_type(:csv)
+        end
+        expect(queries).to eq(0)
+      end
     end
   end
 

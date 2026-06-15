@@ -21,6 +21,30 @@
       <pre><% @source_code.lines.each_with_index do |line, idx| %><div class="source-line"><span class="source-line-number"><%= idx + 1 %></span><span class="source-line-content"><%= ERB::Util.html_escape(line.chomp) %></span></div><% end %></pre>
     </div>
   </div>
+
+  <%# Optional Ruby syntax highlighting via highlight.js (CDN). If the CDN is
+      unreachable, hljs is undefined and the plain line view above is left as-is. %>
+  <link id="hljs-theme" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" crossorigin="anonymous"></script>
+  <script>
+  (function() {
+    if (typeof hljs === "undefined") { return; }
+    var dark = document.documentElement.getAttribute("data-theme") !== "light";
+    var theme = dark ? "github-dark" : "github";
+    document.getElementById("hljs-theme").href =
+      "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/" + theme + ".min.css";
+    document.querySelectorAll(".source-code-body .source-line-content").forEach(function(el) {
+      // Skip already-highlighted lines so a Turbo cache re-exec doesn't
+      // re-highlight token-tagged HTML.
+      if (el.dataset.hljsDone) { return; }
+      // textContent is the raw (unescaped) line; hljs returns escaped, token-tagged HTML.
+      try {
+        el.innerHTML = hljs.highlight(el.textContent, { language: "ruby" }).value;
+        el.dataset.hljsDone = "1";
+      } catch (e) { /* leave plain */ }
+    });
+  })();
+  </script>
 <% else %>
   <div class="card">
     <div class="empty-state">

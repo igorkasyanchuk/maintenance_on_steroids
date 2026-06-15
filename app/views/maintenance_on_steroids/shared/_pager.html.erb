@@ -1,0 +1,21 @@
+<%# Simple prev/next pager (no gem). Locals:
+      page      -- current 1-based page
+      per_page  -- rows per page
+      total     -- total row count
+      url_proc  -- Integer page -> path (e.g. ->(n) { job_path(id: name, page: n) }) %>
+<% total_pages = [(total.to_f / per_page).ceil, 1].max %>
+<% if total_pages > 1 %>
+  <div class="pager">
+    <% if page > 1 %>
+      <a class="btn btn-outline btn-sm" href="<%= url_proc.call(page - 1) %>">&lsaquo; Prev</a>
+    <% else %>
+      <span class="btn btn-outline btn-sm pager-disabled">&lsaquo; Prev</span>
+    <% end %>
+    <span class="pager-info">Page <%= page %> of <%= total_pages %> &middot; <%= total %> total</span>
+    <% if page < total_pages %>
+      <a class="btn btn-outline btn-sm" href="<%= url_proc.call(page + 1) %>">Next &rsaquo;</a>
+    <% else %>
+      <span class="btn btn-outline btn-sm pager-disabled">Next &rsaquo;</span>
+    <% end %>
+  </div>
+<% end %>

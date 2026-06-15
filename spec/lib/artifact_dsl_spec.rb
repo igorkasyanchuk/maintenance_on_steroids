@@ -6,6 +6,13 @@ RSpec.describe MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition do
       .to raise_error(ArgumentError, /Unknown artifact type :json/)
   end
 
+  it "raises when the name collides with a reserved ArtifactsProxy method" do
+    %i[save save! save_all! flush!].each do |reserved|
+      expect { described_class.new(reserved) }
+        .to raise_error(ArgumentError, /reserved/)
+    end
+  end
+
   it "accepts every valid type" do
     %i[jsonb file text csv].each do |t|
       expect { described_class.new(:x, type: t) }.not_to raise_error

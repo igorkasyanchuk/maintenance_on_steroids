@@ -11,6 +11,31 @@ RSpec.describe MaintenanceOnSteroids::ArtifactsProxy do
   let(:definitions) { UpdateUsersTask.artifact_definitions }
   subject { described_class.new(run, definitions) }
 
+  describe "#save" do
+    it "persists a jsonb value immediately and returns the wrapper" do
+      result = nil
+      expect { result = subject.save(:result, { "name" => "Igor", "age" => 40 }) }
+        .to change(MaintenanceOnSteroids::Artifact, :count).by(1)
+      expect(result).to be_a(MaintenanceOnSteroids::JsonbArtifact)
+      expect(run.artifacts.find_by(name: "result").data_jsonb).to eq({ "name" => "Igor", "age" => 40 })
+    end
+
+    it "is equivalent to []= " do
+      subject.save(:result, { "k" => "v" })
+      expect(run.artifacts.find_by(name: "result").data_jsonb).to eq({ "k" => "v" })
+    end
+
+    it "raises for an undeclared artifact" do
+      expect { subject.save(:nope, {}) }.to raise_error(ArgumentError, /Unknown artifact/)
+    end
+  end
+
+  describe "#[]= return value" do
+    it "returns the assigned value (Ruby assignment contract)" do
+      expect(subject.send(:[]=, :result, { "k" => "v" })).to eq({ "k" => "v" })
+    end
+  end
+
   describe "#[]" do
     it "does not persist an artifact record on read" do
       expect { subject[:result] }.not_to change(MaintenanceOnSteroids::Artifact, :count)

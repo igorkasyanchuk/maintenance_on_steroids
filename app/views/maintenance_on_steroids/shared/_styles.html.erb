@@ -488,6 +488,29 @@
     margin-top: 8px;
     color: var(--text-secondary);
   }
+  .artifact-pre-wrap { position: relative; }
+  .artifact-pre-wrap pre { margin-top: 8px; }
+  .artifact-copy-overlay {
+    position: absolute;
+    top: 16px;
+    right: 8px;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .artifact-pre-wrap:hover .artifact-copy-overlay,
+  .artifact-copy-overlay:focus { opacity: 1; }
+
+  /* ===== Pager ===== */
+  .pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .pager-info { font-size: 13px; color: var(--text-muted); }
+  .pager-disabled { opacity: 0.4; pointer-events: none; }
 
   /* ===== Empty ===== */
   .empty-state { text-align: center; padding: 40px 24px; color: var(--text-muted); }

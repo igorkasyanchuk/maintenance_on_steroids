@@ -47,6 +47,52 @@ RSpec.describe "Jobs", type: :request do
       get "/maintenance/jobs/UpdateUsersTask"
       expect(response.body).to include("completed")
     end
+
+    it "paginates the run history" do
+      55.times { MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "completed") }
+
+      get "/maintenance/jobs/UpdateUsersTask"
+      expect(response.body).to include("Page 1 of 2")
+      expect(response.body.scan(/<tr>/).size).to be <= 51 # 50 rows + header
+
+      get "/maintenance/jobs/UpdateUsersTask", params: { page: 2 }
+      expect(response.body).to include("Page 2 of 2")
+    end
+
+    it "clamps out-of-range page params" do
+      55.times { MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "completed") }
+
+      get "/maintenance/jobs/UpdateUsersTask", params: { page: 0 }
+      expect(response.body).to include("Page 1 of 2")
+
+      get "/maintenance/jobs/UpdateUsersTask", params: { page: 9999 }
+      expect(response.body).to include("Page 2 of 2") # clamped to last page
+    end
+
+    it "shows an artifact-count badge for runs with output artifacts" do
+      run = MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "completed")
+      run.artifacts.create!(name: "result", kind: "output", artifact_type: "jsonb", data_jsonb: { "a" => 1 })
+
+      get "/maintenance/jobs/UpdateUsersTask"
+      expect(response.body).to include("&#128206;") # paperclip badge
+    end
+
+    it "omits the artifact badge for runs without output artifacts" do
+      MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "completed")
+      get "/maintenance/jobs/UpdateUsersTask"
+      expect(response.body).not_to include("&#128206;")
+    end
+  end
+
+  describe "GET /maintenance/jobs auto-refresh gating" do
+    it "renders the auto-refresh poller only when a task is active" do
+      get "/maintenance/jobs"
+      expect(response.body).not_to include("setInterval")
+
+      MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "running")
+      get "/maintenance/jobs"
+      expect(response.body).to include("setInterval")
+    end
   end
 
   describe "GET /maintenance/jobs/:id for unknown or non-task constants" do

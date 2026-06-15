@@ -11,26 +11,21 @@ module MaintenanceOnSteroids
       @cache[name] ||= load_artifact(name)
     end
 
-    def []=(name, value)
-      name = name.to_sym
-      definition = @definitions[name]
-      raise ArgumentError, "Unknown artifact: #{name}" unless definition
+    # Explicit, immediate persist of a full artifact value -- the primary write
+    # API. The type is taken from the artifact declaration, so one call covers
+    # every kind:
+    #   artifacts.save(:json_data, { name: "Igor", age: 40 })  # jsonb
+    #   artifacts.save(:export, rows)                           # csv (rows array or String)
+    #   artifacts.save(:log, "done")                            # text
+    # Returns the stored artifact wrapper. No auto-flush involved -- the write
+    # happens now. (`artifacts[name] = value` is an alias.)
+    def save(name, value)
+      write_and_persist(name, value)
+    end
 
-      record = find_or_create_record(name, definition)
-      write_value(record, definition, value)
-      record.refresh_metadata!
-      begin
-        record.save!
-      rescue ActiveRecord::RecordNotUnique
-        # A concurrent writer created the row first (unique index on
-        # run_id/name/kind) -- write into the existing record instead.
-        record = @run.artifacts.find_by!(name: name.to_s, kind: "output")
-        record.artifact_type = definition.storage_type.to_s
-        write_value(record, definition, value)
-        record.refresh_metadata!
-        record.save!
-      end
-      @cache[name] = wrap(record, definition)
+    def []=(name, value)
+      write_and_persist(name, value)
+      value
     end
 
     def save!(name)
@@ -80,6 +75,31 @@ module MaintenanceOnSteroids
     end
 
     private
+
+    # Shared write path for save / []=: write the value into the record,
+    # persist immediately, and cache the wrapper. Handles the concurrent-create
+    # race on the unique (run_id, name, kind) index.
+    def write_and_persist(name, value)
+      name = name.to_sym
+      definition = @definitions[name]
+      raise ArgumentError, "Unknown artifact: #{name}" unless definition
+
+      record = find_or_create_record(name, definition)
+      write_value(record, definition, value)
+      record.refresh_metadata!
+      begin
+        record.save!
+      rescue ActiveRecord::RecordNotUnique
+        # A concurrent writer created the row first (unique index on
+        # run_id/name/kind) -- write into the existing record instead.
+        record = @run.artifacts.find_by!(name: name.to_s, kind: "output")
+        record.artifact_type = definition.storage_type.to_s
+        write_value(record, definition, value)
+        record.refresh_metadata!
+        record.save!
+      end
+      @cache[name] = wrap(record, definition)
+    end
 
     def load_artifact(name)
       definition = @definitions[name]

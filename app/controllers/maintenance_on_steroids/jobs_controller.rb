@@ -22,7 +22,17 @@ module MaintenanceOnSteroids
     end
 
     def show
-      @runs = MaintenanceOnSteroids::Run.where(task_class: @task_class.name).recent.limit(50)
+      @per_page = 50
+      scope = MaintenanceOnSteroids::Run.where(task_class: @task_class.name)
+      @total_runs = scope.count
+      total_pages = [(@total_runs.to_f / @per_page).ceil, 1].max
+      # Clamp both ends so ?page=0/-1 and ?page=99999 don't render dead pages
+      # or trigger huge offset scans.
+      @page = params[:page].to_i.clamp(1, total_pages)
+      @runs = scope.recent.limit(@per_page).offset((@page - 1) * @per_page)
+      @artifact_counts = MaintenanceOnSteroids::Artifact
+                         .where(run_id: @runs.map(&:id), kind: "output")
+                         .group(:run_id).count
     end
 
     def source

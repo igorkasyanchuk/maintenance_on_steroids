@@ -202,6 +202,35 @@ input :role,
   help_text: "The role to assign to matched users"
 ```
 
+**File uploads (`type: :blob`):** the uploaded file is stored with the run (as an `input` artifact) and read through `params`:
+
+- `params[:name]` -- the raw file **bytes** (a `String`), or `nil` if nothing was uploaded
+- `params.file_name(:name)` -- the original filename
+- `params.content_type(:name)` -- the uploaded MIME type
+
+```ruby
+class CountLetterATask < MaintenanceOnSteroids::Task
+  form do
+    input :file, type: :blob, required: true, help_text: "CSV/text file to scan"
+  end
+
+  artifact :result, type: :jsonb, default: {}
+
+  def call
+    content = params[:file].to_s   # raw bytes of the upload
+
+    artifacts.save(:result, {
+      "file_name" => params.file_name(:file),
+      "content_type" => params.content_type(:file),
+      "bytes" => content.bytesize,
+      "a_count" => content.count("aA")   # letter "a", case-insensitive
+    })
+  end
+end
+```
+
+Uploads are read into memory and capped by `config.max_upload_size` (see Configuration). Need a CSV as rows? `CSV.parse(params[:file])`.
+
 ### Artifacts
 
 Store output data (JSON, files, text) that persists with the run:
@@ -242,6 +271,24 @@ An unknown `type:` raises `ArgumentError` at load time, so typos surface immedia
 
 **Declaration options** (all types): `label:` (human name shown in the UI, defaults to the humanized artifact name), `description:` (shown under the artifact on the run page), `content_type:` (download MIME -- otherwise inferred from `file_name`), plus `default:`, `file_name:`, and `headers:` (CSV).
 
+**Writing artifacts -- two styles:**
+
+1. **Explicit (`save`)** -- persist a whole value immediately. The type comes from the declaration, so one call covers every kind. This is the simplest path and never relies on auto-flush:
+
+```ruby
+artifacts.save(:json_data, { name: "Igor", age: 40 })  # jsonb
+artifacts.save(:export, rows)                           # csv (array of rows, or a String)
+artifacts.save(:log, "done")                            # text
+# artifacts[:json_data] = { ... } is an alias of save
+```
+
+2. **Accumulator (`<<` / in-place)** -- build the value incrementally across records; the job auto-flushes it (see Auto-flush below). Best for resumable tasks that accrue output row by row:
+
+```ruby
+artifacts.export << [user.id, user.name]   # append a CSV row
+artifacts.result[user.id.to_s] = { ok: true }  # mutate a JSONB hash in place
+```
+
 **Access** -- `artifacts[:name]` and method style are equivalent:
 
 ```ruby
@@ -271,7 +318,7 @@ def call
 end
 ```
 
-**Auto-flush:** you don't need to call `artifacts[:x].save!` yourself. Any artifact written in memory is automatically persisted by the job when the run completes (after `after_complete` callbacks run, so a final aggregate computed there is captured) and when a run is paused or cancelled mid-flight (so in-progress output is never lost). Reads alone never create a record. You can still call `save!` explicitly if you want intermediate checkpoints.
+**Auto-flush:** this backs the **accumulator** style only -- you don't need to call `artifacts[:x].save!` yourself. Any artifact mutated in memory (`<<`, in-place hash writes) is automatically persisted by the job when the run completes (after `after_complete` callbacks run, so a final aggregate computed there is captured) and when a run is paused or cancelled mid-flight (so in-progress output is never lost). Reads alone never create a record. `artifacts.save(name, value)` already wrote immediately, so it never depends on auto-flush; you can also call `save!` explicitly on an accumulator artifact for intermediate checkpoints.
 
 **Metadata:** every artifact records lightweight stats on save -- entry/line count, byte size, and a generated-at timestamp -- shown on the run page (`12 entries · 3.4 KB · 2 minutes ago`) without loading the full payload. Available on the model via `artifact.summary`, `artifact.byte_size`, and `artifact.generated_at`.
 

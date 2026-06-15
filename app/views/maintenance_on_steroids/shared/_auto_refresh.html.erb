@@ -1,0 +1,70 @@
+<%# Polls the current page every few seconds and swaps the listed element ids
+    in place (no full reload). Pass `target_ids:` -- an array of DOM ids whose
+    innerHTML should be refreshed from the freshly fetched page.
+    Optional `stop_when_gone:` -- a DOM id; once the freshly fetched page no
+    longer contains it (e.g. an "active runs" sentinel), polling stops.
+    Used by the dashboard and the tasks list for live in-progress updates. %>
+<script>
+(function() {
+  var REFRESH_INTERVAL = 4000;
+  var MAX_CONSECUTIVE_FAILURES = 5;
+  var TARGET_IDS = JSON.parse('<%= j target_ids.to_json %>');
+  var STOP_WHEN_GONE = JSON.parse('<%= j (local_assigns[:stop_when_gone] || "").to_json %>');
+  var consecutiveFailures = 0;
+  var timer = null;
+  var inFlight = null;
+
+  function teardown() {
+    if (timer !== null) { clearInterval(timer); timer = null; }
+    if (inFlight !== null) { inFlight.abort(); inFlight = null; }
+    document.removeEventListener("turbo:before-visit", teardown);
+    document.removeEventListener("turbo:before-cache", teardown);
+    window.removeEventListener("pagehide", teardown);
+  }
+
+  document.addEventListener("turbo:before-visit", teardown);
+  document.addEventListener("turbo:before-cache", teardown);
+  window.addEventListener("pagehide", teardown);
+
+  function refresh() {
+    if (document.hidden) { return; }
+    // Abort any still-in-flight refresh before starting a new one so slow
+    // responses can't pile up or land out of order.
+    if (inFlight !== null) { inFlight.abort(); }
+    var controller = new AbortController();
+    inFlight = controller;
+    fetch(window.location.href, { headers: { "Accept": "text/html" }, signal: controller.signal })
+      .then(function(res) {
+        if (!res.ok) { throw new Error("HTTP " + res.status); }
+        return res.text();
+      })
+      .then(function(html) {
+        inFlight = null;
+        consecutiveFailures = 0;
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        TARGET_IDS.forEach(function(id) {
+          var fresh = doc.getElementById(id);
+          var current = document.getElementById(id);
+          // Skip the swap if the user is interacting with something inside the
+          // target (e.g. a focused View/pause link) so it isn't ripped out.
+          // (teardown aborts the in-flight fetch, so this .then never runs
+          // after teardown -- no detached-node guard needed.)
+          if (current && fresh && !current.contains(document.activeElement)) {
+            current.innerHTML = fresh.innerHTML;
+          }
+        });
+        // Stop polling once the freshly fetched page no longer carries the
+        // sentinel (e.g. no more active runs) -- after the final swap.
+        if (STOP_WHEN_GONE && !doc.getElementById(STOP_WHEN_GONE)) { teardown(); }
+      })
+      .catch(function(err) {
+        inFlight = null;
+        if (err && err.name === "AbortError") { return; }
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) { teardown(); }
+      });
+  }
+
+  timer = setInterval(refresh, REFRESH_INTERVAL);
+})();
+</script>
