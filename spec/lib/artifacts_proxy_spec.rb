@@ -99,6 +99,21 @@ RSpec.describe MaintenanceOnSteroids::ArtifactsProxy do
       expect { proxy.flush! }.not_to change(MaintenanceOnSteroids::Artifact, :count)
     end
 
+    it "keeps flushing the remaining artifacts when one save! raises" do
+      jsonb_defn = MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:result, type: :jsonb, default: {})
+      text_defn = MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:summary, type: :text)
+      proxy = described_class.new(run, [jsonb_defn, text_defn])
+
+      proxy[:result]["foo"] = "bar"
+      proxy[:summary] << "hello"
+
+      # First flushed artifact blows up on save!; the second must still persist.
+      allow(proxy[:result]).to receive(:save!).and_raise(ActiveRecord::RecordInvalid)
+
+      expect { proxy.flush! }.not_to raise_error
+      expect(run.artifacts.find_by(name: "summary").data_text).to eq("hello")
+    end
+
     it "is a no-op when nothing was touched" do
       proxy = described_class.new(run, definitions)
       expect { proxy.flush! }.not_to change(MaintenanceOnSteroids::Artifact, :count)

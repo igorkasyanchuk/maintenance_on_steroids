@@ -27,7 +27,11 @@ module MaintenanceOnSteroids
           end
           @rows = parsed
         rescue CSV::MalformedCSVError => e
-          Rails.logger.error "[MaintenanceOnSteroids] CSV artifact reload failed (#{record.name}): #{e.message}"
+          # Resume must proceed, so start from an empty buffer -- but a later
+          # append+save will overwrite the unparseable blob, so log how many
+          # bytes are being discarded rather than losing them silently.
+          Rails.logger.error "[MaintenanceOnSteroids] CSV artifact reload failed " \
+                             "(#{record.name}, discarding #{record.data_blob.bytesize} bytes): #{e.message}"
           @rows = []
         end
       end

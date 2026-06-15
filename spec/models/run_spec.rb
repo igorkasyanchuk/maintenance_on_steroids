@@ -149,6 +149,17 @@ RSpec.describe MaintenanceOnSteroids::Run, type: :model do
       run.update!(status: "running", started_at: 12.hours.ago, progress_current: 10, progress_total: 100)
       expect(run.formatted_estimated_duration).to match(/\A\d+d \d+h \d+m \d+s\z/)
     end
+
+    it "returns nil when progress reaches the total (nothing pending)" do
+      run.update!(status: "running", started_at: 1.minute.ago, progress_current: 100, progress_total: 100)
+      expect(run.formatted_estimated_duration).to be_nil
+    end
+
+    it "returns nil (not a negative estimate) when progress overshoots the total" do
+      run.update!(status: "running", started_at: 1.minute.ago, progress_current: 110, progress_total: 100)
+      expect(run.estimated_duration).to be_nil
+      expect(run.formatted_estimated_duration).to be_nil
+    end
   end
 
   describe "#pause!" do

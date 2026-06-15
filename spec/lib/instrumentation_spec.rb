@@ -152,11 +152,42 @@ RSpec.describe MaintenanceOnSteroids::Instrumentation do
       expect(run.reload.status).to eq("paused")
     end
 
-    it "does not 500 on enqueue! when the enqueued subscriber raises" do
+    it "does not 500 on enqueue! when the enqueued subscriber raises, and still commits the enqueue" do
       run = create_run
       with_raising_subscriber("enqueued.maintenance_on_steroids") do
         expect { run.enqueue! }.not_to raise_error
       end
+      expect(run.reload.active_job_id).to be_present
+    end
+
+    it "still surfaces the original error (and stays errored) when the errored subscriber raises" do
+      failing = Class.new(MaintenanceOnSteroids::Task) do
+        def call = raise("boom")
+      end
+      stub_const("RaisingErroredTask", failing)
+      MaintenanceOnSteroids::JobRegistry.register(failing)
+      run = create_run(task_class: "RaisingErroredTask")
+
+      with_raising_subscriber("errored.maintenance_on_steroids") do
+        expect { MaintenanceOnSteroids::RunJob.perform_now(run.id) }.to raise_error("boom")
+      end
+      expect(run.reload.status).to eq("errored")
+    end
+
+    it "still reaches cancelled when the cancelled subscriber raises" do
+      run = create_run(status: "enqueued")
+      with_raising_subscriber("cancelled.maintenance_on_steroids") do
+        expect { run.cancel! }.not_to raise_error
+      end
+      expect(run.reload.status).to eq("cancelled")
+    end
+
+    it "still re-enqueues when the resumed subscriber raises" do
+      run = create_run(status: "paused")
+      with_raising_subscriber("resumed.maintenance_on_steroids") do
+        expect { run.resume! }.not_to raise_error
+      end
+      expect(run.reload.status).to eq("enqueued")
     end
   end
 end

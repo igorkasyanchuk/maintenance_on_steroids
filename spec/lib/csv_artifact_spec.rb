@@ -54,4 +54,10 @@ RSpec.describe MaintenanceOnSteroids::CsvArtifact do
     artifact.save!
     expect(run.artifacts.find_by(name: "export")).to be_downloadable
   end
+
+  it "rescues a malformed blob on reload (resume-safe) and starts from empty" do
+    bad = described_class.new(new_record(blob: "id,name\n\"unterminated,quote\n"), headers: %w[id name])
+    expect(bad.size).to eq(0)
+    expect(bad).not_to be_dirty
+  end
 end

@@ -193,10 +193,11 @@
         ["dashboard-stats", "active-runs-section"].forEach(function(id) {
           var fresh = doc.getElementById(id);
           var current = document.getElementById(id);
-          // Skip the swap if the target left the live DOM (teardown raced this
-          // microtask), or if the user is interacting with something inside it
-          // (e.g. a focused View/pause link) so it isn't ripped out.
-          if (current && fresh && document.contains(current) && !current.contains(document.activeElement)) {
+          // Skip the swap if the user is interacting with something inside the
+          // target (e.g. a focused View/pause link) so it isn't ripped out.
+          // (teardown aborts the in-flight fetch, so this .then never runs
+          // after teardown -- no detached-node guard needed.)
+          if (current && fresh && !current.contains(document.activeElement)) {
             current.innerHTML = fresh.innerHTML;
           }
         });

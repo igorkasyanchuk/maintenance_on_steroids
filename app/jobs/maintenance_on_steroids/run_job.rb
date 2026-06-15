@@ -182,7 +182,7 @@ module MaintenanceOnSteroids
     def flush_artifacts!
       @task&.artifacts&.flush!
     rescue => e
-      Rails.logger.error "[MaintenanceOnSteroids] Artifact flush error: #{e.message}"
+      Rails.logger.error "[MaintenanceOnSteroids] Artifact flush error: #{e.class}: #{e.message}"
     end
   end
 end
