@@ -20,15 +20,17 @@ maintenance_on_steroids/
 │   │   ├── task.rb                   # Base task class (includes all DSL modules)
 │   │   ├── configuration.rb          # Global config registry
 │   │   ├── job_registry.rb           # Task class discovery and registration
+│   │   ├── instrumentation.rb       # ActiveSupport::Notifications lifecycle events (guarded)
 │   │   ├── form_dsl.rb              # Typed form input builder (8+ input types)
-│   │   ├── artifact_dsl.rb          # Artifact definition (jsonb, file, text)
+│   │   ├── artifact_dsl.rb          # Artifact definition (jsonb, file, text, csv)
 │   │   ├── about_dsl.rb             # Task metadata (title, description, owner)
 │   │   ├── job_dsl.rb               # Job configuration (queue, priority)
 │   │   ├── callbacks_dsl.rb         # Lifecycle callbacks
 │   │   ├── params_proxy.rb          # Typed parameter access with casting
 │   │   ├── artifacts_proxy.rb       # Artifact read/write management
 │   │   ├── jsonb_artifact.rb        # Hash-like JSONB wrapper
-│   │   └── text_artifact.rb         # Text artifact with append/puts
+│   │   ├── text_artifact.rb         # Text artifact with append/puts
+│   │   └── csv_artifact.rb          # Append-oriented CSV artifact (table-previewed)
 │   └── generators/                   # Rails generators
 │       └── maintenance_on_steroids/
 │           ├── install/              # Migration, routes mount, app/maintenance dir

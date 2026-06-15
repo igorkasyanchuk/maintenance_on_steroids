@@ -124,6 +124,14 @@ RSpec.describe MaintenanceOnSteroids::Instrumentation do
       ActiveSupport::Notifications.unsubscribe(subscriber)
     end
 
+    it "still reaches completed when the started subscriber raises" do
+      run = create_run
+      with_raising_subscriber("started.maintenance_on_steroids") do
+        MaintenanceOnSteroids::RunJob.perform_now(run.id)
+      end
+      expect(run.reload.status).to eq("completed")
+    end
+
     it "still reaches completed when the succeeded subscriber raises" do
       run = create_run
       with_raising_subscriber("succeeded.maintenance_on_steroids") do
