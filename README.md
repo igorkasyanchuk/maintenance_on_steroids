@@ -4,6 +4,9 @@ A powerful maintenance task runner for **Rails 8.1+** that leverages `ActiveJob:
 
 **Built-in web dashboard** with dark/light themes, live progress tracking, pause/resume/cancel controls, source code viewer, and artifact downloads.
 
+> [!IMPORTANT]
+> **Requires Rails >= 8.1 and Ruby >= 3.2.** Resumption is built on `ActiveJob::Continuable`, which ships in Rails 8.1 — the gem will not install on earlier Rails versions.
+
 ## Features
 
 - **Collection & callable tasks** -- iterate over ActiveRecord relations or run one-off jobs
@@ -20,8 +23,8 @@ A powerful maintenance task runner for **Rails 8.1+** that leverages `ActiveJob:
 
 ## Requirements
 
-- Ruby >= 3.2
-- Rails >= 8.1 (uses `ActiveJob::Continuable`)
+- **Rails >= 8.1** — hard requirement; resumption depends on `ActiveJob::Continuable`, introduced in Rails 8.1
+- **Ruby >= 3.2**
 
 ## Installation
 
