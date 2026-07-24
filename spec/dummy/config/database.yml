@@ -1,7 +1,14 @@
-development:
+default: &default
   adapter: sqlite3
+  # Without a busy timeout SQLite raises "database is locked" the instant two
+  # connections write at once -- which is exactly what happens when the
+  # dashboard writes a pause/cancel while a worker is mid-run.
+  timeout: 5000
+
+development:
+  <<: *default
   database: db/development.sqlite3
 
 test:
-  adapter: sqlite3
+  <<: *default
   database: ":memory:"
