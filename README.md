@@ -4,6 +4,8 @@ A powerful maintenance task runner for **Rails 8.1+** that leverages `ActiveJob:
 
 **Built-in web dashboard** with dark/light themes, live progress tracking, pause/resume/cancel controls, source code viewer, and artifact downloads.
 
+![Maintenance on Steroids dashboard walkthrough](https://raw.githubusercontent.com/igorkasyanchuk/maintenance_on_steroids/main/docs/demo.gif)
+
 > [!IMPORTANT]
 > **Requires Rails >= 8.1 and Ruby >= 3.2.** Resumption is built on `ActiveJob::Continuable`, which ships in Rails 8.1 — the gem will not install on earlier Rails versions.
 
@@ -586,6 +588,19 @@ MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes)
 ```
 
 Pick a threshold comfortably larger than the time your slowest task needs to process a single record. `enqueued` and `paused` runs are never reaped.
+
+### Running on SQLite
+
+A running task writes to the runs table after every processed record, so the dashboard's own writes (pause, cancel, resume) compete with the worker for SQLite's single writer. Make sure your `database.yml` sets a busy timeout, or those clicks will fail with `SQLite3::BusyException: database is locked`:
+
+```yaml
+production:
+  adapter: sqlite3
+  database: storage/production.sqlite3
+  timeout: 5000    # ms to wait for the write lock instead of failing instantly
+```
+
+The default is `0` -- no waiting at all. Postgres and MySQL need no equivalent setting.
 
 ## Instrumentation
 

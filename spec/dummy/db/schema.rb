@@ -24,6 +24,8 @@ ActiveRecord::Schema[8.1].define(version: 0) do
     t.string "name", null: false
     t.integer "run_id", null: false
     t.datetime "updated_at", null: false
+    t.index ["run_id", "name", "kind"], name: "idx_mos_artifacts_run_name_kind", unique: true
+    t.index ["run_id"], name: "index_maintenance_on_steroids_artifacts_on_run_id"
   end
 
   create_table "maintenance_on_steroids_runs", force: :cascade do |t|
@@ -43,6 +45,11 @@ ActiveRecord::Schema[8.1].define(version: 0) do
     t.string "user_email"
     t.string "user_id"
     t.string "user_type"
+    t.index ["created_at"], name: "index_maintenance_on_steroids_runs_on_created_at"
+    t.index ["status"], name: "index_maintenance_on_steroids_runs_on_status"
+    t.index ["task_class", "created_at"], name: "idx_on_task_class_created_at_5dc1e6cb4b"
+    t.index ["task_class", "status"], name: "idx_on_task_class_status_b6c92a5d68"
+    t.index ["task_class"], name: "index_maintenance_on_steroids_runs_on_task_class"
   end
 
   create_table "products", force: :cascade do |t|

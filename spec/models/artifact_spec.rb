@@ -22,6 +22,27 @@ RSpec.describe MaintenanceOnSteroids::Artifact, type: :model do
     end
   end
 
+  # ArtifactsProxy#write_and_persist rescues ActiveRecord::RecordNotUnique to
+  # handle concurrent writers, which only works if the index the install
+  # migration adds actually exists. Guards schema drift in the dummy app.
+  describe "unique (run_id, name, kind) index" do
+    it "rejects a duplicate name+kind for the same run" do
+      run.artifacts.create!(name: "dup", kind: "output", artifact_type: "jsonb")
+
+      expect {
+        run.artifacts.create!(name: "dup", kind: "output", artifact_type: "jsonb")
+      }.to raise_error(ActiveRecord::RecordNotUnique)
+    end
+
+    it "allows the same name for a different kind" do
+      run.artifacts.create!(name: "same", kind: "output", artifact_type: "jsonb")
+
+      expect {
+        run.artifacts.create!(name: "same", kind: "input", artifact_type: "blob")
+      }.not_to raise_error
+    end
+  end
+
   describe "#data" do
     it "returns jsonb data" do
       a = run.artifacts.create!(name: "test", kind: "output", artifact_type: "jsonb", data_jsonb: { "foo" => "bar" })
