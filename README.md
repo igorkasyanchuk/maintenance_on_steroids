@@ -1,10 +1,10 @@
 # Maintenance on Steroids
 
+![Maintenance on Steroids dashboard walkthrough](docs/demo.gif)
+
 A powerful maintenance task runner for **Rails 8.1+** that leverages `ActiveJob::Continuable` for safe, resumable background processing. Think of it as a batteries-included toolkit for one-off data migrations, batch updates, CSV exports, and any maintenance work your app needs.
 
 **Built-in web dashboard** with dark/light themes, live progress tracking, pause/resume/cancel controls, source code viewer, and artifact downloads.
-
-![Maintenance on Steroids dashboard walkthrough](https://raw.githubusercontent.com/igorkasyanchuk/maintenance_on_steroids/main/docs/demo.gif)
 
 > [!IMPORTANT]
 > **Requires Rails >= 8.1 and Ruby >= 3.2.** Resumption is built on `ActiveJob::Continuable`, which ships in Rails 8.1 — the gem will not install on earlier Rails versions.
