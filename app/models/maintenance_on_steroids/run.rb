@@ -138,14 +138,11 @@ module MaintenanceOnSteroids
 
     # Compare-and-set so two concurrent resumes can't both enqueue a job
     # for the same run. Returns true when this call won the transition.
-    # Raises if enqueuing fails -- callers surface that to the operator.
+    # Raises EnqueueFailed if the job could not be queued.
     def resume!
       claimed = self.class.where(id: id, status: RESUMABLE_STATUSES).update_all(
         status: "enqueued",
         active_job_id: nil,
-        completed_at: nil,
-        error_message: nil,
-        error_backtrace: nil,
         updated_at: Time.current
       ) == 1
       return false unless claimed
@@ -157,14 +154,20 @@ module MaintenanceOnSteroids
         # The CAS above already left "paused"/"errored", so a failure here
         # (queue backend down, task class deleted) would strand the run in
         # "enqueued" with no job behind it. Put it back in a terminal state
-        # the operator can act on.
+        # the operator can act on, keeping error_backtrace so the original
+        # failure is still on the page.
         update!(
           status: "errored",
           error_message: "Failed to enqueue: #{e.message}",
           completed_at: Time.current
         )
-        raise
+        raise EnqueueFailed, e.message
       end
+
+      # Cleared only now that the run is really on its way again -- doing it in
+      # the CAS above would destroy the original error before we know whether
+      # the resume even succeeds.
+      update_columns(completed_at: nil, error_message: nil, error_backtrace: nil)
       safe_instrument(:resumed)
       true
     end

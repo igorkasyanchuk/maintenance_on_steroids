@@ -39,3 +39,39 @@ RSpec.describe "select input validation", type: :request do
     expect(response.body).to include("Missing required parameters")
   end
 end
+
+RSpec.describe "scalar input validation", type: :request do
+  let!(:task_class) do
+    klass = Class.new(MaintenanceOnSteroids::Task) do
+      about { title "Scalar Task" }
+      form { input :email, type: :string }
+      def call; end
+    end
+    stub_const("ScalarTask", klass)
+    MaintenanceOnSteroids::JobRegistry.register(klass)
+    klass
+  end
+
+  it "accepts a plain string" do
+    expect {
+      post "/maintenance/jobs/ScalarTask/runs", params: { task_params: { email: "a@b.c" } }
+    }.to change { MaintenanceOnSteroids::Run.count }.by(1)
+  end
+
+  it "rejects a nested structure posted where a scalar was declared" do
+    expect {
+      post "/maintenance/jobs/ScalarTask/runs", params: { task_params: { email: { "x" => "1" } } }
+    }.not_to change { MaintenanceOnSteroids::Run.count }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.body).to include("Invalid value for")
+  end
+
+  it "rejects an array posted where a scalar was declared" do
+    expect {
+      post "/maintenance/jobs/ScalarTask/runs", params: { task_params: { email: %w[a b] } }
+    }.not_to change { MaintenanceOnSteroids::Run.count }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
+end

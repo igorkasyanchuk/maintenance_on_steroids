@@ -86,15 +86,30 @@ module MaintenanceOnSteroids
   # control in production.
   class InsecureDashboardError < StandardError; end
 
+  # Raised by Run#resume! when the job could not be put on the queue. Narrow
+  # on purpose: controllers catch this and show the operator why, while any
+  # other exception keeps propagating to the app's error reporting.
+  class EnqueueFailed < StandardError; end
+
   class << self
     def configure
       yield self
     end
 
-    # True when HTTP Basic is on *and* its password was actually changed.
+    # True when HTTP Basic is on *and* carries a password that actually
+    # protects anything. Blank counts as unprotected: the controller compares
+    # the supplied password against this value, so an empty one authenticates
+    # every request -- the common way to get there is a credentials key that
+    # is missing or misspelled and quietly resolves to nil.
     def http_basic_authentication_configured?
-      http_basic_authentication_enabled &&
-        http_basic_authentication_password.to_s != DEFAULT_HTTP_BASIC_PASSWORD
+      http_basic_authentication_enabled && !http_basic_password_unsafe?
+    end
+
+    # The shipped placeholder, or blank -- neither is access control.
+    def http_basic_password_unsafe?
+      password = http_basic_authentication_password.to_s
+
+      password.empty? || password == DEFAULT_HTTP_BASIC_PASSWORD
     end
 
     # True when at least one access-control layer is meaningfully configured.
@@ -122,25 +137,30 @@ module MaintenanceOnSteroids
       end
 
       reason =
-        if http_basic_authentication_enabled
-          "HTTP Basic is enabled but still uses the shipped default password"
-        else
+        if !http_basic_authentication_enabled
           "no access control is configured"
+        elsif http_basic_authentication_password.to_s.empty?
+          "HTTP Basic is enabled but its password is blank, which authenticates every request"
+        else
+          "HTTP Basic is enabled but still uses the shipped default password"
         end
 
-      message =
-        "[MaintenanceOnSteroids] Refusing to boot: #{reason}. Anyone who can reach the mounted " \
-        "dashboard could view every task, read its source, and start runs against this database. " \
-        "Set http_basic_authentication_password (to something other than the default), " \
-        "authentication, or verify_access_proc in config/initializers/maintenance_on_steroids.rb. " \
-        "If the dashboard is already protected elsewhere (reverse proxy, VPN, middleware), set " \
+      # Built once and prefixed per branch: deriving the warning by stripping a
+      # substring out of the raise message would silently start announcing
+      # "Refusing to boot" for boots that were never refused.
+      body =
+        "#{reason}. Anyone who can reach the mounted dashboard could view every task, read its " \
+        "source, and start runs against this database. Set http_basic_authentication_password " \
+        "(to something other than blank or the default), authentication, or verify_access_proc " \
+        "in config/initializers/maintenance_on_steroids.rb. If the dashboard is already protected " \
+        "elsewhere (reverse proxy, VPN, middleware), set " \
         "MaintenanceOnSteroids.allow_insecure_dashboard = true to acknowledge that."
 
       if env.production? && !allow_insecure_dashboard
-        raise InsecureDashboardError, message
+        raise InsecureDashboardError, "[MaintenanceOnSteroids] Refusing to boot: #{body}"
       end
 
-      logger&.warn(message.sub("Refusing to boot: ", ""))
+      logger&.warn("[MaintenanceOnSteroids] #{body}")
     end
 
     # Discover all task classes defined in the host app

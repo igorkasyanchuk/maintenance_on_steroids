@@ -32,6 +32,19 @@ RSpec.describe "MaintenanceOnSteroids.verify_access_control!" do
       expect(MaintenanceOnSteroids.access_control_configured?).to be(false)
     end
 
+    it "is false when the Basic password is blank" do
+      # The template recommends Rails.application.credentials.<key>; a missing
+      # or misspelled key resolves to nil, and secure_compare against "" would
+      # then authenticate every request.
+      MaintenanceOnSteroids.http_basic_authentication_enabled = true
+      MaintenanceOnSteroids.http_basic_authentication_password = nil
+
+      expect(MaintenanceOnSteroids.access_control_configured?).to be(false)
+
+      MaintenanceOnSteroids.http_basic_authentication_password = ""
+      expect(MaintenanceOnSteroids.access_control_configured?).to be(false)
+    end
+
     it "is true once the Basic password is changed" do
       MaintenanceOnSteroids.http_basic_authentication_enabled = true
       MaintenanceOnSteroids.http_basic_authentication_password = "a real secret"
@@ -53,6 +66,14 @@ RSpec.describe "MaintenanceOnSteroids.verify_access_control!" do
     it "refuses to boot when nothing is configured" do
       expect { verify(env: production) }
         .to raise_error(MaintenanceOnSteroids::InsecureDashboardError, /no access control is configured/)
+    end
+
+    it "refuses to boot when the Basic password is blank" do
+      MaintenanceOnSteroids.http_basic_authentication_enabled = true
+      MaintenanceOnSteroids.http_basic_authentication_password = nil
+
+      expect { verify(env: production) }
+        .to raise_error(MaintenanceOnSteroids::InsecureDashboardError, /password is blank/)
     end
 
     it "refuses to boot when Basic still uses the default password" do
@@ -81,6 +102,13 @@ RSpec.describe "MaintenanceOnSteroids.verify_access_control!" do
     it "warns instead of raising" do
       expect { verify }.not_to raise_error
       expect(buffer.string).to match(/no access control is configured/)
+    end
+
+    it "does not claim it refused a boot it did not refuse" do
+      verify
+
+      expect(buffer.string).to include("[MaintenanceOnSteroids]")
+      expect(buffer.string).not_to include("Refusing to boot")
     end
 
     it "still warns about an authentication hook with no authorization" do

@@ -21,6 +21,10 @@ module MaintenanceOnSteroids
     def perform(run_id)
       @run = MaintenanceOnSteroids::Run.find(run_id)
       @task = @run.task_class.constantize.new(@run)
+      # Resolved once: JobDsl#job_config allocates a fresh JobConfig on every
+      # call when the task declares no `job` block, and the role is consulted
+      # once per processed record.
+      @database_role = @task.class.job_config.database_role
 
       # Guard against duplicate execution: terminal runs (including errored
       # runs re-delivered by adapter-level retries) must not restart.
@@ -45,7 +49,12 @@ module MaintenanceOnSteroids
         elsif @task.callable_task?
           step :execute do |_step|
             check_status!
-            with_collection_role { @task.call }
+            # No role wrapper here on purpose: `database_role` scopes the
+            # collection scan, and a callable task's `call` is mostly writes.
+            # Running it under :reading would make the first write fail on a
+            # real replica. Callable tasks wrap their own reads with
+            # Task#with_database_role.
+            @task.call
           end
         else
           raise "Task #{@run.task_class} must define either collection+process or call"
@@ -128,14 +137,13 @@ module MaintenanceOnSteroids
     # Both are pass-throughs unless the task declared `job { database_role ... }`,
     # so the default path pays nothing for connection switching.
     def with_collection_role(&block)
-      role = @task.class.job_config.database_role
-      return yield unless role
+      return yield unless @database_role
 
-      ActiveRecord::Base.connected_to(role: role, &block)
+      ActiveRecord::Base.connected_to(role: @database_role, &block)
     end
 
     def with_writing_role(&block)
-      return yield unless @task.class.job_config.database_role
+      return yield unless @database_role
 
       ActiveRecord::Base.connected_to(role: :writing, &block)
     end

@@ -13,7 +13,7 @@ module MaintenanceOnSteroids
         return render :new, status: :unprocessable_entity
       end
 
-      invalid = invalid_select_inputs
+      invalid = invalid_scalar_inputs
       if invalid.any?
         flash.now[:alert] = "Invalid value for: #{invalid.map(&:label).join(', ')}."
         return render :new, status: :unprocessable_entity
@@ -77,9 +77,11 @@ module MaintenanceOnSteroids
       else
         redirect_to run_path(@run), alert: "Task cannot be resumed (status: #{@run.reload.status})."
       end
-    rescue => e
-      # Run#resume! already rolled the run back to a terminal status; show the
-      # operator why instead of a 500 (mirrors the enqueue guard in #create).
+    rescue MaintenanceOnSteroids::EnqueueFailed => e
+      # Narrow on purpose: Run#resume! already rolled the run back to a terminal
+      # status, so show the operator why instead of a 500. Anything else still
+      # propagates to the host app's error reporting rather than being
+      # mislabelled as an enqueue failure.
       redirect_to run_path(@run), alert: "Run could not be enqueued: #{e.message}"
     end
 
@@ -141,14 +143,27 @@ module MaintenanceOnSteroids
       end
     end
 
-    # A <select> only constrains the browser -- the posted value is whatever the
-    # client sends. Anything outside the declared options is rejected rather
-    # than handed to the task.
-    def invalid_select_inputs
-      @task_class.form_inputs.select { |i| i.type == :select && i.options.present? }.select do |input|
+    # The form only constrains the browser -- the posted value is whatever the
+    # client sends. Two things are rejected rather than handed to the task:
+    # a <select> value outside its declared options, and a nested structure
+    # (`task_params[name][x]=1`) where a scalar was declared.
+    def invalid_scalar_inputs
+      @task_class.form_inputs.reject(&:blob?).select do |input|
         value = params.dig(:task_params, input.name)
-        value.present? && input.options.map(&:to_s).exclude?(value.to_s)
+        next false if value.nil?
+        next true unless scalar_param?(value)
+
+        input.type == :select && input.options.present? &&
+          value.present? && input.options.map(&:to_s).exclude?(value.to_s)
       end
+    end
+
+    # Rails gives scalars as Strings; anything hash- or array-shaped came from
+    # a client building its own payload.
+    def scalar_param?(value)
+      !value.is_a?(Array) &&
+        !value.is_a?(Hash) &&
+        !value.is_a?(ActionController::Parameters)
     end
 
     def oversized_file_inputs

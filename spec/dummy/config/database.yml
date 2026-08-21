@@ -5,10 +5,12 @@ default: &default
 <% if postgres %>
   adapter: postgresql
   encoding: unicode
-  host: <%= ENV.fetch("POSTGRES_HOST", "localhost") %>
-  port: <%= ENV.fetch("POSTGRES_PORT", "5432") %>
-  username: <%= ENV.fetch("POSTGRES_USER", "postgres") %>
-  password: <%= ENV.fetch("POSTGRES_PASSWORD", "postgres") %>
+  <%# Quoted: a password containing ":", "#", "%" or "@" is legal and would
+      otherwise turn a bad credential into a Psych::SyntaxError. %>
+  host: "<%= ENV.fetch('POSTGRES_HOST', 'localhost') %>"
+  port: "<%= ENV.fetch('POSTGRES_PORT', '5432') %>"
+  username: "<%= ENV.fetch('POSTGRES_USER', 'postgres') %>"
+  password: "<%= ENV.fetch('POSTGRES_PASSWORD', 'postgres') %>"
 <% else %>
   adapter: sqlite3
   <%# Without a busy timeout SQLite raises "database is locked" the instant two

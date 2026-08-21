@@ -51,9 +51,13 @@ module MaintenanceOnSteroids
       end
     end
 
-    # True when the inline preview is showing less than the whole artifact.
+    # True when the inline preview shows less than the whole artifact -- either
+    # because the payload is over the byte cap or because a jsonb document had
+    # more than PREVIEW_ENTRIES top-level entries.
     def preview_truncated?
-      (byte_size || 0) > PREVIEW_BYTES
+      return true if (byte_size || 0) > PREVIEW_BYTES
+
+      jsonb_over_entry_cap?
     end
 
     # Download attributes -- correct MIME and filename even for generated files
@@ -111,10 +115,13 @@ module MaintenanceOnSteroids
       end
     end
 
-    # Prefers the precomputed metadata byte count; falls back to the blob
-    # column for legacy rows saved before metadata tracking existed.
+    # Prefers the precomputed metadata byte count; falls back to measuring the
+    # column that actually holds this type's payload. The old fallback only
+    # looked at data_blob, so jsonb and text rows written before metadata
+    # tracking reported nil -- which made preview_truncated? answer false and
+    # bypassed every preview cap that depends on it.
     def byte_size
-      metadata&.dig("bytes") || data_blob&.bytesize
+      metadata&.dig("bytes") || measured_byte_size
     end
 
     def generated_at
@@ -138,24 +145,60 @@ module MaintenanceOnSteroids
       end
     end
 
-    # data_jsonb trimmed to PREVIEW_ENTRIES top-level entries when it is over
-    # the byte cap. Scalars and small documents pass through untouched.
+    # data_jsonb trimmed to PREVIEW_ENTRIES top-level entries. Driven by the
+    # entry count itself rather than by preview_truncated?, so a row with no
+    # recorded byte size still gets trimmed instead of being generated whole.
+    # Scalars and small documents pass through untouched.
     def previewable_jsonb
-      return data_jsonb unless preview_truncated?
-
       case data_jsonb
-      when Hash  then data_jsonb.first(PREVIEW_ENTRIES).to_h
-      when Array then data_jsonb.first(PREVIEW_ENTRIES)
+      when Hash  then data_jsonb.size > PREVIEW_ENTRIES ? data_jsonb.first(PREVIEW_ENTRIES).to_h : data_jsonb
+      when Array then data_jsonb.size > PREVIEW_ENTRIES ? data_jsonb.first(PREVIEW_ENTRIES) : data_jsonb
       else data_jsonb
       end
     end
 
-    # First PREVIEW_BYTES of a payload, cut back to the last complete line so
-    # a truncated slice still parses as CSV and doesn't end mid-character.
-    def preview_slice(content)
-      return content if content.bytesize <= PREVIEW_BYTES
+    def jsonb_over_entry_cap?
+      artifact_type == "jsonb" &&
+        data_jsonb.respond_to?(:size) &&
+        !data_jsonb.is_a?(String) &&
+        data_jsonb.size > PREVIEW_ENTRIES
+    end
 
-      content.byteslice(0, PREVIEW_BYTES).sub(/[^\n]*\z/, "")
+    def measured_byte_size
+      case artifact_type
+      when "jsonb"       then data_jsonb && data_jsonb.to_json.bytesize
+      when "text"        then data_text&.bytesize
+      when "blob", "csv" then data_blob&.bytesize
+      end
+    end
+
+    # At most PREVIEW_BYTES of a payload, always returned as valid UTF-8, cut
+    # back to the last complete line when it had to be truncated.
+    #
+    # Two encoding traps here, both of which used to reach the run page:
+    #   - data_blob comes back as ASCII-8BIT, and interpolating a BINARY string
+    #     holding non-ASCII bytes into the UTF-8 template raises
+    #     Encoding::CompatibilityError -- so any CSV export containing an
+    #     accented character took the page down, at any size.
+    #   - byteslice cuts on a byte boundary, landing inside a multibyte
+    #     character often enough to matter, and matching a Regexp against the
+    #     resulting invalid string raises ArgumentError.
+    # Slice first (bounded work), then transcode and scrub the small result.
+    def preview_slice(content)
+      truncated = content.bytesize > PREVIEW_BYTES
+      sliced = truncated ? content.byteslice(0, PREVIEW_BYTES) : content
+
+      sliced = sliced.dup.force_encoding(Encoding::UTF_8)
+      sliced = sliced.scrub("") unless sliced.valid_encoding?
+
+      return sliced unless truncated
+
+      # Drop the trailing partial line -- but only when there is an earlier
+      # newline to fall back to. A single-line payload (a minified blob, a log
+      # with no line breaks) has no newline in the slice at all, and the regex
+      # would match the whole thing and leave an empty preview.
+      trimmed = sliced.sub(/[^\n]*\z/, "")
+      trimmed.empty? ? sliced : trimmed
     end
 
     def human_size

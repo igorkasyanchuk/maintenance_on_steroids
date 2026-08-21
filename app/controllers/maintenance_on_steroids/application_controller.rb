@@ -14,6 +14,17 @@ module MaintenanceOnSteroids
     def verify_http_basic_authentication
       return unless MaintenanceOnSteroids.http_basic_authentication_enabled
 
+      # A blank configured password would make secure_compare(supplied, "")
+      # succeed for anyone sending an empty password. Refuse outright rather
+      # than authenticate against nothing.
+      if MaintenanceOnSteroids.http_basic_authentication_password.to_s.empty?
+        Rails.logger.error(
+          "[MaintenanceOnSteroids] HTTP Basic is enabled but the password is blank; denying access. " \
+          "Set MaintenanceOnSteroids.http_basic_authentication_password."
+        )
+        return render plain: "Access denied", status: :forbidden
+      end
+
       authenticate_or_request_with_http_basic("Maintenance on Steroids") do |username, password|
         ActiveSupport::SecurityUtils.secure_compare(username, MaintenanceOnSteroids.http_basic_authentication_user_name.to_s) &
           ActiveSupport::SecurityUtils.secure_compare(password, MaintenanceOnSteroids.http_basic_authentication_password.to_s)

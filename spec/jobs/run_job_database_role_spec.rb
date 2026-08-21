@@ -73,3 +73,54 @@ RSpec.describe "RunJob database_role", type: :job do
     end
   end
 end
+
+RSpec.describe "RunJob database_role scope", type: :job do
+  it "does not wrap a callable task's body in the read role" do
+    klass = Class.new(MaintenanceOnSteroids::Task) do
+      about { title "Callable Replica Task" }
+      job { database_role :reading }
+      artifact :result, type: :jsonb, default: {}
+
+      def call
+        # A callable task is mostly writes; running this under :reading would
+        # fail on a real replica.
+        artifacts.save(:result, { "ok" => true })
+      end
+    end
+    stub_const("CallableReplicaTask", klass)
+    MaintenanceOnSteroids::JobRegistry.register(klass)
+
+    run = MaintenanceOnSteroids::Run.create!(task_class: "CallableReplicaTask", status: "enqueued", params: {})
+
+    roles = []
+    allow(ActiveRecord::Base).to receive(:connected_to).and_wrap_original do |_o, **kw, &b|
+      roles << kw[:role]
+      b.call
+    end
+
+    MaintenanceOnSteroids::RunJob.perform_now(run.id)
+
+    expect(roles).to be_empty
+    expect(run.reload.status).to eq("completed")
+    expect(run.artifacts.find_by(name: "result").data_jsonb).to eq("ok" => true)
+  end
+
+  it "reads job_config once per run, not once per record" do
+    3.times { |i| User.create!(name: "C#{i}", email: "cfg-#{i}@test.com", password: "password", active: true) }
+    run = MaintenanceOnSteroids::Run.create!(task_class: "UpdateUsersTask", status: "enqueued",
+                                             params: { "name" => "C0", "age" => "5" })
+
+    calls = 0
+    allow(UpdateUsersTask).to receive(:job_config).and_wrap_original do |original|
+      calls += 1
+      original.call
+    end
+
+    MaintenanceOnSteroids::RunJob.perform_now(run.id)
+
+    # Resolved once in #perform. job_config allocates a fresh JobConfig each
+    # call when no `job` block is declared, so per-record reads meant one
+    # throwaway object per record.
+    expect(calls).to eq(1)
+  end
+end

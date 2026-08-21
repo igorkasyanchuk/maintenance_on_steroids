@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A blank HTTP Basic password no longer counts as configured.** The check
+  added in 0.1.1 compared only against the shipped `"secret"`, so a nil
+  password -- the result of a missing or misspelled credentials key, which is
+  exactly the pattern the generated initializer recommends -- passed as
+  configured, booted production without a warning, and let `admin` plus an
+  empty password through, because `secure_compare(supplied, "")` matches. Blank
+  is now treated as unconfigured, and the controller refuses to authenticate at
+  all while the configured password is blank.
+
+### Fixed
+
+- **Artifact previews no longer crash the run page on non-ASCII content.**
+  Two separate encoding faults: `data_blob` is ASCII-8BIT, so interpolating a
+  CSV cell holding an accented character into the UTF-8 template raised
+  `Encoding::CompatibilityError` at any size; and `byteslice` could cut a
+  multibyte character in half, after which matching the line-trim regex raised
+  `ArgumentError: invalid byte sequence in UTF-8`. Slices are now transcoded
+  and scrubbed before use.
+- **A single-line artifact no longer previews as empty.** The line-trim regex
+  matched the entire slice when it contained no newline, blanking the preview
+  of any minified or unbroken payload over the cap.
+- **jsonb previews respect the cap on rows with no recorded metadata.**
+  `byte_size` fell back to `data_blob`, which is nil for jsonb and text, so
+  `preview_truncated?` answered false, the whole document was generated, and
+  the byte slice then cut it into unparseable JSON with no truncation notice.
+  `byte_size` now measures the column that holds the payload, and jsonb
+  trimming keys off the entry count directly.
+- **`database_role` no longer wraps a callable task's `call`.** It scopes the
+  collection scan; running a callable task's body -- mostly writes -- under
+  `:reading` would fail on a real replica. Callable tasks use
+  `Task#with_database_role` for their own reads.
+- **`job_config` is resolved once per run instead of once per record.** It
+  allocates a fresh `JobConfig` whenever a task declares no `job` block, so the
+  per-record role check meant one throwaway object per processed record.
+- **`Run#resume!` keeps the original failure.** It cleared `error_message` and
+  `error_backtrace` before attempting to enqueue, so a resume that itself
+  failed destroyed the only record of why the run died. They are now cleared
+  only once the job is really queued.
+- **`Run#resume!` raises `MaintenanceOnSteroids::EnqueueFailed`** rather than
+  the raw exception, and the controller catches only that -- other errors reach
+  the host app's error reporting instead of being redirected as "Run could not
+  be enqueued".
+- **Scalar form inputs reject nested structures.** A client posting
+  `task_params[name][x]=1` where a string was declared handed the task a
+  Parameters object; it is now rejected alongside out-of-range select values.
+
+### Changed
+
+- `pg` moved to an optional bundler group, so the resolved bundle no longer
+  depends on `DB` being set in the shell; switching between the SQLite and
+  PostgreSQL suites no longer needs a re-install.
+- The Postgres test setup no longer drops every table in the database before
+  loading the schema (schema.rb already uses `force: :cascade`), which removed
+  a way for concurrent rspec processes to clobber each other.
+- Connection values in the dummy app's `database.yml` are quoted, so a password
+  containing `:`, `#`, `%` or `@` no longer produces a YAML syntax error.
+
 ## [0.1.1] - 2026-08-21
 
 ### Security

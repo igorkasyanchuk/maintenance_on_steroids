@@ -5,14 +5,15 @@ require_relative "dummy/config/environment"
 require "rspec/rails"
 
 # Load the schema into the test database. SQLite runs in memory, so this is
-# per-process; Postgres needs the database created and any previous schema
-# dropped first.
+# per-process; Postgres just needs the database to exist.
+#
+# Every create_table in schema.rb carries force: :cascade, so it already
+# replaces the tables it defines. Dropping the whole database first would add
+# nothing except a way for two concurrent rspec processes -- or a developer
+# who put something else in this database -- to lose tables.
 ActiveRecord::Schema.verbose = false
 if ActiveRecord::Base.connection_db_config.adapter.to_s.include?("postgresql")
   ActiveRecord::Tasks::DatabaseTasks.create_current("test")
-  ActiveRecord::Base.connection.tables.each do |table|
-    ActiveRecord::Base.connection.drop_table(table, force: :cascade)
-  end
 end
 load File.expand_path("dummy/db/schema.rb", __dir__)
 
