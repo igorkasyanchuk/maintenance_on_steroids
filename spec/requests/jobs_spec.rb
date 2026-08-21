@@ -140,3 +140,37 @@ RSpec.describe "Jobs", type: :request do
     end
   end
 end
+
+RSpec.describe "Jobs list ordering", type: :request do
+  # sort_by is not stable, so tasks sharing a sort key used to swap places
+  # between page loads.
+  let!(:twins) do
+    a = Class.new(MaintenanceOnSteroids::Task) do
+      about { title "Same Title" }
+      def call; end
+    end
+    b = Class.new(MaintenanceOnSteroids::Task) do
+      about { title "same title" }
+      def call; end
+    end
+    stub_const("ZebraTask", a)
+    stub_const("AardvarkTask", b)
+    [a, b].each { |k| MaintenanceOnSteroids::JobRegistry.register(k) }
+    [a, b]
+  end
+
+  it "orders tasks with the same title deterministically across requests" do
+    bodies = 3.times.map { get("/maintenance/jobs"); response.body }
+
+    orders = bodies.map { |b| [b.index("AardvarkTask"), b.index("ZebraTask")] }
+    expect(orders.uniq.size).to eq(1)
+    # Class name breaks the tie, so the alphabetically first one wins.
+    expect(orders.first.first).to be < orders.first.last
+  end
+
+  it "orders never-executed tasks deterministically under sort=last_run" do
+    bodies = 3.times.map { get("/maintenance/jobs", params: { sort: "last_run" }); response.body }
+
+    expect(bodies.map { |b| b.index("AardvarkTask") <=> b.index("ZebraTask") }.uniq.size).to eq(1)
+  end
+end

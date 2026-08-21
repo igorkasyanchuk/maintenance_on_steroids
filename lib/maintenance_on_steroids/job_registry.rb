@@ -52,8 +52,18 @@ module MaintenanceOnSteroids
           # eager_load_dir is a no-op for constants Zeitwerk already loaded,
           # so after a reset! (tests, code reload) the inherited-hook
           # registrations are gone. Sweep descendants to re-register them.
+          #
+          # Only classes their own constant still resolves to: a class keeps the
+          # name it was first assigned even after the constant is removed or
+          # rebound, and it stays in descendants either way. Registering those
+          # blindly makes the dashboard list ghost tasks -- stale copies after a
+          # code reload in development, and every stubbed class a test ever
+          # defined.
           MaintenanceOnSteroids::Task.descendants.each do |klass|
-            register(klass) if klass.name
+            next if klass.name.blank?
+            next unless klass.name.safe_constantize.equal?(klass)
+
+            register(klass)
           end
 
           @loaded = true

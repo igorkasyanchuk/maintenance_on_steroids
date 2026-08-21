@@ -17,6 +17,28 @@ module MaintenanceOnSteroids
       @run = run
     end
 
+    # Set by RunJob so a task can honour pause/cancel mid-work.
+    attr_writer :checkpoint_handler
+
+    # Honour a pending pause or cancel at this point.
+    #
+    # A collection task gets this for free between records. A callable task is
+    # a single Continuable step, so without an explicit call here a long-running
+    # `call` ignores Pause until it returns. Sprinkle it through the slow parts:
+    #
+    #   def call
+    #     Account.find_each do |account|
+    #       checkpoint!
+    #       account.recalculate!
+    #     end
+    #   end
+    #
+    # When a stop is pending this does not return -- the job unwinds and the
+    # run lands in "paused" or "cancelled". No-op outside a job.
+    def checkpoint!
+      @checkpoint_handler&.call
+    end
+
     # Access typed form parameters
     def params
       @params_proxy ||= ParamsProxy.new(@run, self.class.form_inputs)

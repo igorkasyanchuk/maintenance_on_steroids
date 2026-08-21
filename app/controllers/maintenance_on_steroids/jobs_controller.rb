@@ -12,12 +12,16 @@ module MaintenanceOnSteroids
                    .where(id: MaintenanceOnSteroids::Run.where(task_class: names).group(:task_class).select("MAX(id)"))
                    .index_by(&:task_class)
       @sort = params[:sort] == "last_run" ? "last_run" : "name"
+      # Class name is the tiebreaker in both orders. sort_by is not stable, so
+      # without it two tasks sharing a title -- or any two never-executed tasks,
+      # which all share the same epoch timestamp -- swap places between page
+      # loads for no reason.
       @task_classes =
         if @sort == "last_run"
           # Most recently executed first; never-executed tasks at the bottom.
-          @task_classes.sort_by { |tc| @last_runs[tc.name]&.created_at || Time.at(0) }.reverse
+          @task_classes.sort_by { |tc| [-(@last_runs[tc.name]&.created_at.to_i || 0), tc.name.to_s] }
         else
-          @task_classes.sort_by { |tc| tc.task_title.to_s.downcase }
+          @task_classes.sort_by { |tc| [tc.task_title.to_s.downcase, tc.name.to_s] }
         end
     end
 

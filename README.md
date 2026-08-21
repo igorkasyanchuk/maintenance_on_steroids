@@ -498,6 +498,7 @@ end
 |--------|---------|-------------|
 | `parent_controller` | `"ActionController::Base"` | Base controller class for the engine |
 | `max_upload_size` | `50.megabytes` | Maximum size (bytes) for file inputs uploaded when starting a run |
+| `max_artifact_size` | `64.megabytes` | Hard ceiling on a single stored artifact; exceeding it fails the run |
 | `http_basic_authentication_enabled` | `false` | Enable HTTP Basic auth |
 | `http_basic_authentication_user_name` | `"admin"` | HTTP Basic username |
 | `http_basic_authentication_password` | `"secret"` | HTTP Basic password |
@@ -636,6 +637,109 @@ Pick a threshold comfortably larger than the time your slowest task needs to pro
 ### Recovering from a failed run
 
 A run that raises is marked `errored` and stops, with the message and backtrace on the run page. Because the cursor was persisted after each successful record, you can fix the cause and hit **Resume**: the run picks up from the record that failed and reprocesses nothing before it. Resuming clears the stored error.
+
+### Pruning old runs
+
+Nothing expires runs on its own, so a long-lived app keeps every run, backtrace
+and stored artifact forever. `Run.prune!` deletes finished runs (and their
+artifacts) past a cutoff; schedule it like `reap_stale!`:
+
+```ruby
+MaintenanceOnSteroids::Run.prune!(older_than: 90.days)
+```
+
+Only `completed`, `cancelled` and `errored` runs are eligible — anything active
+or paused is left alone regardless of age. Returns the number deleted.
+
+### Artifact size limits
+
+**Artifacts are buffered in the worker's memory and stored in a single database
+row.** That makes them ideal for maintenance *results* — a summary, a log, a
+few thousand rows of exceptions — and unsuitable as a bulk-export pipeline.
+A million-row CSV will exhaust the worker before it ever reaches the database.
+
+`MaintenanceOnSteroids.max_artifact_size` (default 64 MB) turns that into a
+clear failure instead of an OOM kill: exceeding it fails the run with a message
+naming the artifact. For genuinely large output, write to object storage from
+the task and keep only a reference:
+
+```ruby
+def process(record)
+  # ... build rows ...
+end
+
+after_complete do
+  key = S3Uploader.call(big_file)
+  artifacts.save(:location, { bucket: "exports", key: key })
+end
+```
+
+Inline previews on the run page are separately capped (256 KB, or 200 top-level
+entries for JSON documents) so viewing a large artifact can't take down the web
+process. The full payload is still available via Download for file and CSV
+artifacts.
+
+### Pausing a long-running callable task
+
+Collection tasks check for a pending pause or cancel between records. A callable
+task is a single unit of work, so a long `call` won't notice Pause until it
+returns. Call `checkpoint!` at the points where stopping is safe:
+
+```ruby
+def call
+  Account.find_each do |account|
+    checkpoint!          # honours a pending Pause/Cancel here
+    account.recalculate!
+  end
+end
+```
+
+When a stop is pending, `checkpoint!` does not return — the job unwinds, buffered
+artifacts are flushed, and the run lands in `paused` or `cancelled`.
+
+### Preventing concurrent runs
+
+Nothing stops an operator from starting the same task twice — a double-clicked
+**New Run** on a destructive task runs it twice. Declare a limit:
+
+```ruby
+class BackfillTask < MaintenanceOnSteroids::Task
+  job do
+    concurrency 1
+  end
+end
+```
+
+Further runs are refused while that many are still active. The check is advisory
+(two simultaneous submissions can still race); it exists to catch the double-click,
+not to provide a distributed lock. For a hard guarantee, take an advisory lock
+inside the task itself.
+
+### Content Security Policy
+
+The dashboard's live updates use small inline `<script>` blocks and no build
+step, so a strict CSP without `'unsafe-inline'` will block polling (the pages
+still render and work; they just stop refreshing themselves). If your app sets
+a strict policy, scope an exception to the mounted path:
+
+```ruby
+# config/initializers/content_security_policy.rb
+Rails.application.config.content_security_policy_nonce_directives = %w[script-src]
+```
+
+or exclude the engine's path from the policy entirely.
+
+### Collections with UUID or string primary keys
+
+Resumption works by remembering the last processed primary key and continuing
+with `WHERE id > cursor`, which assumes keys increase over time. That holds for
+integer and bigint keys, and for time-ordered UUIDs (UUIDv7, ULID). It does
+**not** hold for random UUIDv4: after an interruption such a run can skip
+records it never processed and reprocess others.
+
+The job logs a warning when it detects a non-integer primary key. If your
+collection uses random UUIDs, either avoid pause/resume for it or scope the
+collection so each run is complete in itself.
 
 ### Running on SQLite
 

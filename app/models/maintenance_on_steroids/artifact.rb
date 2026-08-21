@@ -20,6 +20,8 @@ module MaintenanceOnSteroids
     # is trimmed before it is rendered, and the byte cap is a second backstop.
     PREVIEW_ENTRIES = 200
 
+    validate :payload_within_size_limit
+
     def data
       case artifact_type
       when "jsonb"      then data_jsonb
@@ -162,6 +164,25 @@ module MaintenanceOnSteroids
         data_jsonb.respond_to?(:size) &&
         !data_jsonb.is_a?(String) &&
         data_jsonb.size > PREVIEW_ENTRIES
+    end
+
+    # One choke point for every write path (explicit save, accumulator flush,
+    # file input). Failing the run with a legible message beats an OOM killer
+    # or a database-level error halfway through a long task.
+    def payload_within_size_limit
+      limit = MaintenanceOnSteroids.max_artifact_size
+      return if limit.nil?
+
+      size = measured_byte_size
+      return if size.nil? || size <= limit
+
+      errors.add(
+        :base,
+        "artifact #{name.inspect} is #{ActiveSupport::NumberHelper.number_to_human_size(size)}, " \
+        "over the #{ActiveSupport::NumberHelper.number_to_human_size(limit)} limit " \
+        "(MaintenanceOnSteroids.max_artifact_size). Write large outputs to object storage " \
+        "and store a reference instead."
+      )
     end
 
     def measured_byte_size

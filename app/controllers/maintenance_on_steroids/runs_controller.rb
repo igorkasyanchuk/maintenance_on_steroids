@@ -19,6 +19,13 @@ module MaintenanceOnSteroids
         return render :new, status: :unprocessable_entity
       end
 
+      if concurrency_exceeded?
+        limit = @task_class.job_config.concurrency
+        flash.now[:alert] =
+          "This task allows #{limit} concurrent #{'run'.pluralize(limit)} and that many are already active."
+        return render :new, status: :unprocessable_entity
+      end
+
       oversized = oversized_file_inputs
       if oversized.any?
         max_mb = MaintenanceOnSteroids.max_upload_size / (1024 * 1024)
@@ -141,6 +148,16 @@ module MaintenanceOnSteroids
         value = params.dig(:task_params, input.name)
         input.blob? ? !value.respond_to?(:read) : value.blank?
       end
+    end
+
+    # Advisory guard for `job { concurrency N }`. Racy by nature -- two
+    # simultaneous submissions can both pass -- but it catches the case this
+    # exists for: a double-clicked New Run starting a destructive task twice.
+    def concurrency_exceeded?
+      limit = @task_class.job_config.concurrency
+      return false if limit.nil? || limit <= 0
+
+      MaintenanceOnSteroids::Run.active.where(task_class: @task_class.name).count >= limit
     end
 
     # The form only constrains the browser -- the posted value is whatever the

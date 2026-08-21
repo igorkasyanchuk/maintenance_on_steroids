@@ -38,6 +38,17 @@ RSpec.describe MaintenanceOnSteroids::Generators::InstallGenerator do
     expect(content).to match(/ActiveRecord::Migration\[\d+\.\d+\]/)
   end
 
+  it "picks jsonb on PostgreSQL and json elsewhere, at migrate time" do
+    migration = Dir[File.join(destination, "db/migrate/*_create_maintenance_on_steroids_tables.rb")].first
+    content = File.read(migration)
+
+    # Resolved against the connection when the migration runs, so the same file
+    # is correct whichever database the host uses.
+    expect(content).to include("t.public_send(json_type, :data_jsonb)")
+    expect(content).to match(/def json_type.*postgres.*:jsonb : :json/m)
+    expect(content).not_to include("t.json ")
+  end
+
   it "creates the initializer, with access control front and centre" do
     initializer = read("config/initializers/maintenance_on_steroids.rb")
 

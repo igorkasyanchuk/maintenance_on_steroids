@@ -25,6 +25,9 @@ module MaintenanceOnSteroids
       # call when the task declares no `job` block, and the role is consulted
       # once per processed record.
       @database_role = @task.class.job_config.database_role
+      # Lets a long-running callable task honour pause/cancel between units of
+      # its own work; collection tasks get the same check between records.
+      @task.checkpoint_handler = method(:check_status!)
 
       # Guard against duplicate execution: terminal runs (including errored
       # runs re-delivered by adapter-level retries) must not restart.

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Run.prune!(older_than:)`** deletes finished runs and their artifacts.
+  Nothing expired these rows before, so a long-lived app accumulated every run,
+  backtrace and stored blob indefinitely. Active and paused runs are never
+  pruned regardless of age.
+- **`MaintenanceOnSteroids.max_artifact_size`** (default 64 MB) caps a single
+  stored artifact. Artifacts are buffered in worker memory and stored in one
+  row, so an unbounded export previously OOM-killed the worker; it now fails
+  the run with a message naming the artifact and its size.
+- **`Task#checkpoint!`** lets a long-running callable task honour Pause and
+  Cancel mid-work. A callable task is a single Continuable step, so without it
+  a slow `call` ignored Pause until it returned.
+- **`job { concurrency N }`** refuses to start a task while N of its runs are
+  already active -- the guard a destructive task needs against a double-clicked
+  New Run. Advisory, not a distributed lock.
+
+### Fixed
+
+- **The task list no longer reorders itself between page loads.** `sort_by` is
+  not stable, so two tasks sharing a title -- or any two never-executed tasks
+  under `sort=last_run`, which all share the same epoch key -- swapped places
+  for no reason. Class name is now the tiebreaker in both orders.
+- **Ghost tasks no longer reach the dashboard.** A class keeps the name it was
+  first assigned even after its constant is removed or rebound, and it stays in
+  `Task.descendants`, so the registry's sweep re-registered stale copies after
+  a development code reload. The sweep now skips any class its own constant no
+  longer resolves to.
+
+### Changed
+
+- The install migration now picks **`jsonb` on PostgreSQL** (`json` elsewhere)
+  for the three JSON columns, resolved against the connection at migrate time.
+  Existing installs are unaffected; convert with your own migration if you want
+  the indexable type.
+- README documents the operational limits that were previously implicit:
+  artifact buffering and size caps, pruning, callable-task pause behaviour,
+  concurrent runs, the Content Security Policy requirement for live updates,
+  and why collections with random UUID primary keys are unsafe to resume.
+
 ### Security
 
 - **A blank HTTP Basic password no longer counts as configured.** The check

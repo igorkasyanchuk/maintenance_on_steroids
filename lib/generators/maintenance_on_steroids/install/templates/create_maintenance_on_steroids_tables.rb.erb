@@ -3,7 +3,7 @@ class CreateMaintenanceOnSteroidsTables < ActiveRecord::Migration<%= migration_v
     create_table :maintenance_on_steroids_runs do |t|
       t.string  :task_class,       null: false
       t.string  :status,           null: false, default: "enqueued"
-      t.json    :params,           default: {}
+      t.public_send(json_type, :params, default: {})
       t.string  :cursor
       t.integer :progress_current, null: false, default: 0
       t.integer :progress_total,   null: false, default: 0
@@ -31,16 +31,25 @@ class CreateMaintenanceOnSteroidsTables < ActiveRecord::Migration<%= migration_v
       t.string  :name,          null: false
       t.string  :kind,          null: false, default: "output"
       t.string  :artifact_type, null: false, default: "jsonb"
-      t.json    :data_jsonb
+      t.public_send(json_type, :data_jsonb)
       t.binary  :data_blob
       t.text    :data_text
       t.string  :file_name
       t.string  :content_type
-      t.json    :metadata,      default: {}
+      t.public_send(json_type, :metadata, default: {})
 
       t.timestamps
     end
 
     add_index :maintenance_on_steroids_artifacts, [:run_id, :name, :kind], unique: true, name: "idx_mos_artifacts_run_name_kind"
+  end
+
+  private
+
+  # jsonb on PostgreSQL: it is the indexable, canonical form, and the columns
+  # are named for it. Resolved at migrate time rather than generate time, so
+  # the same migration is correct wherever it runs. Everything else gets json.
+  def json_type
+    connection.adapter_name.match?(/postgres/i) ? :jsonb : :json
   end
 end

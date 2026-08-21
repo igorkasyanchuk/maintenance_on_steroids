@@ -11,6 +11,8 @@ module MaintenanceOnSteroids
     # Statuses that mean "a worker currently holds this run" -- candidates
     # for staleness reaping when the worker died without updating the row.
     STALE_CANDIDATE_STATUSES = %w[running pausing cancelling].freeze
+    # Runs that will never change again, and so are safe to prune.
+    TERMINAL_STATUSES = %w[completed cancelled errored].freeze
 
     validates :task_class, presence: true
     validates :status, inclusion: { in: STATUSES }
@@ -36,6 +38,28 @@ module MaintenanceOnSteroids
           completed_at: Time.current,
           updated_at: Time.current
         )
+    end
+
+    # Deletes finished runs older than `older_than`, with their artifacts.
+    # Nothing expires these rows on its own, so a long-lived app accumulates
+    # every run, backtrace and stored blob forever. Call this periodically the
+    # same way as reap_stale!:
+    #
+    #   MaintenanceOnSteroids::Run.prune!(older_than: 90.days)
+    #
+    # Only terminal runs are eligible -- anything still active or paused is
+    # left alone regardless of age. Returns the number of runs deleted.
+    def self.prune!(older_than: 90.days, statuses: TERMINAL_STATUSES)
+      scope = where(status: Array(statuses) & TERMINAL_STATUSES)
+              .where(created_at: ...older_than.ago)
+
+      # destroy_all rather than delete_all so dependent artifacts go too;
+      # batched so pruning a large backlog doesn't build one huge transaction.
+      deleted = 0
+      scope.in_batches(of: 500) do |batch|
+        deleted += batch.destroy_all.size
+      end
+      deleted
     end
 
     def active?

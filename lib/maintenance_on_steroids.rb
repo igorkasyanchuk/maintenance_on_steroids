@@ -23,6 +23,16 @@ module MaintenanceOnSteroids
   # Uploads are read into memory and stored in the artifacts table.
   mattr_accessor :max_upload_size, default: 50 * 1024 * 1024
 
+  # Hard ceiling on a single stored artifact, in bytes.
+  #
+  # Artifacts are buffered in the worker's memory and stored in one database
+  # row, so this is a real limit, not a preference: without it a runaway export
+  # OOMs the worker or writes a payload the database has to TOAST. Exceeding it
+  # fails the run with a clear message instead. Raise it if you know your
+  # workers and database can take it; for genuine bulk export, write to object
+  # storage from the task and keep only a reference here.
+  mattr_accessor :max_artifact_size, default: 64 * 1024 * 1024
+
   # Proc to resolve the current user who triggered the run.
   # Must return an object responding to #id (and optionally #email).
   # Example:

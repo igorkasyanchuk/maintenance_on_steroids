@@ -9,6 +9,7 @@ module MaintenanceOnSteroids
         @queue_name     = nil
         @priority       = nil
         @database_role  = nil
+        @concurrency    = nil
       end
 
       def queue(name)
@@ -20,6 +21,16 @@ module MaintenanceOnSteroids
         return @priority if value == :__unset__
 
         @priority = value
+      end
+
+      # Maximum number of runs of this task that may be active at once.
+      # `concurrency 1` is the usual choice for a destructive task: without it
+      # a double-click on New Run happily starts the same migration twice.
+      # nil (the default) means unlimited. Acts as setter and reader.
+      def concurrency(value = :__unset__)
+        return @concurrency if value == :__unset__
+
+        @concurrency = value&.to_i
       end
 
       # Database role the collection is read under, e.g. `database_role :reading`
