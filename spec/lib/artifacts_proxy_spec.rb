@@ -303,9 +303,15 @@ end
 RSpec.describe MaintenanceOnSteroids::ArtifactsProxy, "read caching" do
   let(:run) { MaintenanceOnSteroids::Run.create!(task_class: "CsvExportTask", status: "running") }
 
+  # Counts real artifact loads only. Active Record tags its column/index
+  # introspection as "SCHEMA", and whether that fires here depends on which
+  # spec touched the model first -- counting it makes this assertion depend on
+  # the random ordering seed.
   def artifact_queries
     count = 0
     sub = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
+      next if %w[SCHEMA CACHE TRANSACTION].include?(payload[:name])
+
       count += 1 if payload[:sql].to_s.include?("maintenance_on_steroids_artifacts")
     end
     yield
