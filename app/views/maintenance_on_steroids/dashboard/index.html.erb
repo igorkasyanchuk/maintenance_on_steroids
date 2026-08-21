@@ -30,6 +30,10 @@
   <h2>Active Runs</h2>
   <div class="card" style="padding: 0; overflow: hidden;" id="active-runs-section">
     <% if @active_runs.any? %>
+      <%# Sentinel for _auto_refresh's stop_when_gone: once no run is active
+          there is nothing left to poll for, so the poller shuts itself down
+          instead of re-rendering the dashboard every 4s indefinitely. %>
+      <span id="has-active-runs" hidden></span>
       <table>
         <thead>
           <tr>
@@ -154,4 +158,6 @@
   </div>
 </div>
 
-<%= render "maintenance_on_steroids/shared/auto_refresh", target_ids: ["dashboard-stats", "active-runs-section"] %>
+<%= render "maintenance_on_steroids/shared/auto_refresh",
+           target_ids: ["dashboard-stats", "active-runs-section"],
+           stop_when_gone: "has-active-runs" %>

@@ -32,4 +32,6 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "rails", ">= 8.1"
+  # csv left Ruby's default gems in 3.4; csv_artifact.rb requires it at load time.
+  spec.add_dependency "csv"
 end

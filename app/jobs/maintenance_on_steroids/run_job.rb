@@ -2,6 +2,19 @@ module MaintenanceOnSteroids
   class RunJob < ActiveJob::Base
     include ActiveJob::Continuable
 
+    # The run row is the record of truth. If it was deleted there is nothing
+    # left to do, and retrying only produces a RecordNotFound storm in the
+    # queue -- ~21 failing attempts over a day for work that can never succeed.
+    discard_on ActiveRecord::RecordNotFound
+
+    # Continuable would otherwise silently re-enqueue a job that raised after
+    # the continuation advanced. This gem surfaces errors to an operator
+    # instead: #perform marks the run "errored" and stops, and the operator
+    # resumes it from the dashboard (Run#resumable? includes "errored").
+    # Left on, that hidden retry fires against an already-terminal run and
+    # no-ops, so the run looks retried but never advances.
+    self.resume_errors_after_advancing = false
+
     # Allow configuring queue via the task's job DSL
     # The queue is set dynamically when enqueuing
 
@@ -32,7 +45,7 @@ module MaintenanceOnSteroids
         elsif @task.callable_task?
           step :execute do |_step|
             check_status!
-            @task.call
+            with_collection_role { @task.call }
           end
         else
           raise "Task #{@run.task_class} must define either collection+process or call"
@@ -40,6 +53,14 @@ module MaintenanceOnSteroids
 
         complete_run!
       end
+    rescue ActiveJob::Continuation::Interrupt
+      # Continuable is about to re-enqueue this job. Leaving the row in
+      # "running" freezes its updated_at heartbeat, so Run.reap_stale! would
+      # mistake a queued run for a dead worker and mark it errored. CAS on
+      # "running" so a pause/cancel requested in the meantime is not clobbered.
+      Run.where(id: @run.id, status: "running")
+         .update_all(status: "enqueued", updated_at: Time.current) if @run
+      raise
     rescue => e
       @run&.update!(
         status: "errored",
@@ -49,19 +70,26 @@ module MaintenanceOnSteroids
       )
       safe_instrument(:errored, @run, error: e) if @run
       safe_callback { @task&.run_error_callbacks }
-      flush_artifacts!
       raise
+    ensure
+      # Single flush point for every exit path -- completion, pause, cancel,
+      # error, and (critically) ActiveJob::Continuation::Interrupt, which
+      # subclasses Exception and so is invisible to `rescue => e`. Without it a
+      # SIGTERM mid-run discards every buffered artifact row while the cursor
+      # keeps advancing, and the run still reports "completed".
+      # flush! is dirty-only and never raises, so re-entry here is a no-op.
+      flush_artifacts!
     end
 
     private
 
     def process_collection
       step :process_collection do |step|
-        @collection ||= @task.collection
+        @collection ||= with_collection_role { @task.collection }
         warn_about_non_integer_primary_key(@collection)
 
         if @run.progress_total.zero?
-          total = @collection.count
+          total = with_collection_role { @collection.count }
           @run.update!(progress_total: total)
         end
 
@@ -77,17 +105,39 @@ module MaintenanceOnSteroids
                   @collection.unscope(:order)
                 end
 
-        scope.order(@collection.model.primary_key => :asc).find_each do |record|
-          check_status!
+        # The role wraps the whole scan, so every batch query hits the replica.
+        # Each record's work steps back to :writing -- process may write, and
+        # the run's own cursor/progress bookkeeping always does.
+        with_collection_role do
+          scope.order(@collection.model.primary_key => :asc).find_each do |record|
+            with_writing_role do
+              check_status!
 
-          @task.process(record)
-          cursor_value = record.public_send(record.class.primary_key)
-          advance_progress!(cursor_value)
-          # Record the last processed pk as an exclusive cursor (resume uses gt(cursor)),
-          # matching @run.cursor semantics. advance! would store pk+1 and skip a record.
-          step.set!(cursor_value)
+              @task.process(record)
+              cursor_value = record.public_send(record.class.primary_key)
+              advance_progress!(cursor_value)
+              # Record the last processed pk as an exclusive cursor (resume uses gt(cursor)),
+              # matching @run.cursor semantics. advance! would store pk+1 and skip a record.
+              step.set!(cursor_value)
+            end
+          end
         end
       end
+    end
+
+    # Both are pass-throughs unless the task declared `job { database_role ... }`,
+    # so the default path pays nothing for connection switching.
+    def with_collection_role(&block)
+      role = @task.class.job_config.database_role
+      return yield unless role
+
+      ActiveRecord::Base.connected_to(role: role, &block)
+    end
+
+    def with_writing_role(&block)
+      return yield unless @task.class.job_config.database_role
+
+      ActiveRecord::Base.connected_to(role: :writing, &block)
     end
 
     # Atomic SQL increment: avoids read-modify-write lost updates and keeps
@@ -115,8 +165,6 @@ module MaintenanceOnSteroids
       if completed
         safe_instrument(:succeeded, @run)
         safe_callback { @task.run_complete_callbacks }
-        # Flush AFTER callbacks so any final aggregate they compute persists.
-        flush_artifacts!
       else
         check_status!
       end
@@ -147,15 +195,12 @@ module MaintenanceOnSteroids
         @run.update!(status: "paused")
         safe_instrument(:paused, @run)
         safe_callback { @task.run_pause_callbacks }
-        # Persist work-in-progress buffers so a pause/resume doesn't lose them.
-        flush_artifacts!
         throw :abort_run
       when "cancelling"
         safe_callback { @task.run_interrupt_callbacks }
         @run.update!(status: "cancelled", completed_at: Time.current)
         safe_instrument(:cancelled, @run)
         safe_callback { @task.run_cancel_callbacks }
-        flush_artifacts!
         throw :abort_run
       end
     end
@@ -171,7 +216,9 @@ module MaintenanceOnSteroids
     end
 
     # Auto-persists any artifact the task wrote in memory but didn't explicitly
-    # save. Dirty-only, so reads never create phantom rows. Never raises.
+    # save. Dirty-only, so reads never create phantom rows, and re-running it
+    # after a save is a no-op. Never raises -- it runs from perform's ensure,
+    # where an exception would mask the real one.
     def flush_artifacts!
       @task&.artifacts&.flush!
     rescue => e

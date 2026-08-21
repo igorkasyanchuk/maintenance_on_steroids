@@ -16,17 +16,11 @@ module MaintenanceOnSteroids
       MaintenanceOnSteroids::JobRegistry.reset!
     end
 
-    # An authentication hook alone only verifies *who* the user is -- without
-    # verify_access_proc every authenticated user can reach the dashboard.
+    # Access control is opt-in, so the dangerous configuration is the empty
+    # one -- and HTTP Basic left on its shipped password is the same thing
+    # wearing a badge. See MaintenanceOnSteroids.verify_access_control!.
     config.after_initialize do
-      if MaintenanceOnSteroids.authentication && MaintenanceOnSteroids.verify_access_proc.nil?
-        Rails.logger.warn(
-          "[MaintenanceOnSteroids] `authentication` is configured without `verify_access_proc`: " \
-          "any authenticated user can access the maintenance dashboard. Set " \
-          "MaintenanceOnSteroids.verify_access_proc to restrict access (unless your " \
-          "authentication hook already enforces authorization)."
-        )
-      end
+      MaintenanceOnSteroids.verify_access_control!
     end
   end
 end

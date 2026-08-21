@@ -416,17 +416,48 @@ end
 
 ### Database Role Switching
 
-Read from a replica:
+To scan a collection against a replica, declare the role. The job holds it open
+for the whole scan:
 
 ```ruby
-def collection
-  with_database_role(:read) { User.where(active: true) }
+class BackfillTask < MaintenanceOnSteroids::Task
+  job do
+    database_role :reading   # :read is accepted too
+  end
+
+  def collection
+    User.where(active: true)   # every batch query runs on the replica
+  end
+
+  def process(user)
+    user.update!(...)          # writes run on the primary
+  end
 end
 ```
 
+`process` and the run's own cursor/progress bookkeeping step back to `:writing`
+automatically, so a declared read role never blocks the task's writes.
+
+For a one-off read inside `call` or `process`, `with_database_role` wraps a
+block:
+
+```ruby
+def call
+  stale = with_database_role(:read) { User.where(active: false).count }
+  artifacts.save(:summary, { stale: stale })
+end
+```
+
+> **The block must force whatever it reads.** Returning a lazy `Relation` from
+> `with_database_role` does nothing — the role is restored on the way out and
+> the query runs later, on the primary. That is why `collection` uses the
+> declarative `database_role` above instead.
+
 ## Configuration
 
-Create an initializer at `config/initializers/maintenance_on_steroids.rb`:
+`rails g maintenance_on_steroids:install` writes
+`config/initializers/maintenance_on_steroids.rb` for you, with every access
+control commented out and ready to fill in. The full set of options:
 
 ```ruby
 MaintenanceOnSteroids.configure do |config|
@@ -474,6 +505,7 @@ end
 | `verify_access_proc` | `nil` | Proc receiving controller, return true/false |
 | `current_user_resolver` | `nil` | Proc returning the current user object |
 | `user_display_formatter` | `nil` | Proc receiving Run, returning display string |
+| `allow_insecure_dashboard` | `false` | Boot in production with no access-control layer configured |
 
 ### Authentication & Access Control
 
@@ -486,7 +518,17 @@ The dashboard is mounted in **your** app, so it inherits your app's middleware �
 | 3 | **Access check** | `verify_access_proc` | After the hook | `403 Forbidden` (`"Access denied"`) |
 
 > [!WARNING]
-> Access control is **opt-in**. With none of these configured, anyone who can reach the mounted path can run, pause, and cancel maintenance tasks. Configure at least one layer before deploying. The shipped HTTP Basic defaults (`admin` / `secret`) are **placeholders** — always override the password, and prefer HTTPS since Basic credentials travel in every request.
+> **In production the engine refuses to boot until one layer is configured.** With none of them set, anyone who can reach the mounted path can run, pause, and cancel maintenance tasks against your database.
+>
+> The shipped HTTP Basic defaults (`admin` / `secret`) are **placeholders**, and leaving the password at `"secret"` counts as *unconfigured* — a dashboard behind a published password is not protected, and treating it as configured would make the most dangerous setup the quietest one. Override it, and prefer HTTPS since Basic credentials travel in every request.
+>
+> If the dashboard is already gated somewhere this gem cannot see — a reverse proxy, a VPN, your own middleware — say so explicitly rather than leaving the layers empty:
+>
+> ```ruby
+> config.allow_insecure_dashboard = true
+> ```
+>
+> Outside production, an unconfigured dashboard logs a warning instead of raising.
 
 #### Recipe: HTTP Basic (quickest)
 
@@ -572,7 +614,9 @@ This gem uses Rails 8.1's `ActiveJob::Continuable` for safe background processin
 4. If you pause and resume, a new job is enqueued that reads the cursor from the database
 5. In both cases, the query uses `WHERE id > cursor` to skip already-processed records
 
-**Records are never processed twice.** The gem includes tests that verify this behavior across Sidekiq restarts, pause/resume cycles, and multiple interruptions.
+**No record is skipped, and only a failed record is retried.** The cursor advances only *after* `process` returns, so an interruption or a pause replays nothing already done, while a record that raised is retried on the next resume (at-least-once for that record). The suite verifies this across Sidekiq restarts, pause/resume cycles, and multiple interruptions.
+
+Artifacts buffered in memory are flushed on every exit path -- completion, pause, cancel, error, and worker interruption -- so a deploy mid-run never silently truncates a CSV or log artifact.
 
 > **Note:** cursor-based resumption relies on monotonically increasing primary keys. Collections with UUID/string primary keys can skip or repeat records on resume -- the job logs a warning when it detects one.
 
@@ -587,7 +631,11 @@ If a worker process dies hard (OOM kill, `kill -9`, node failure), its run can b
 MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes)
 ```
 
-Pick a threshold comfortably larger than the time your slowest task needs to process a single record. `enqueued` and `paused` runs are never reaped.
+Pick a threshold comfortably larger than the time your slowest task needs to process a single record. `enqueued` and `paused` runs are never reaped -- and a run interrupted by `ActiveJob::Continuable` is moved back to `enqueued` before its job is re-queued, so a backed-up queue can never get it reaped out from under the worker.
+
+### Recovering from a failed run
+
+A run that raises is marked `errored` and stops, with the message and backtrace on the run page. Because the cursor was persisted after each successful record, you can fix the cause and hit **Resume**: the run picks up from the record that failed and reprocesses nothing before it. Resuming clears the stored error.
 
 ### Running on SQLite
 

@@ -4,8 +4,16 @@ require_relative "dummy/config/environment"
 
 require "rspec/rails"
 
-# Load schema into in-memory SQLite
+# Load the schema into the test database. SQLite runs in memory, so this is
+# per-process; Postgres needs the database created and any previous schema
+# dropped first.
 ActiveRecord::Schema.verbose = false
+if ActiveRecord::Base.connection_db_config.adapter.to_s.include?("postgresql")
+  ActiveRecord::Tasks::DatabaseTasks.create_current("test")
+  ActiveRecord::Base.connection.tables.each do |table|
+    ActiveRecord::Base.connection.drop_table(table, force: :cascade)
+  end
+end
 load File.expand_path("dummy/db/schema.rb", __dir__)
 
 # Load dummy app maintenance tasks
@@ -27,7 +35,10 @@ RSpec.configure do |config|
 
     # Disable auth in tests by default (individual specs can override)
     MaintenanceOnSteroids.http_basic_authentication_enabled = false
+    MaintenanceOnSteroids.http_basic_authentication_user_name = MaintenanceOnSteroids::DEFAULT_HTTP_BASIC_USER_NAME
+    MaintenanceOnSteroids.http_basic_authentication_password = MaintenanceOnSteroids::DEFAULT_HTTP_BASIC_PASSWORD
     MaintenanceOnSteroids.verify_access_proc = nil
     MaintenanceOnSteroids.authentication = nil
+    MaintenanceOnSteroids.allow_insecure_dashboard = false
   end
 end

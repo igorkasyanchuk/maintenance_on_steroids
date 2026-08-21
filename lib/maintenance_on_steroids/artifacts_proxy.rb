@@ -8,7 +8,12 @@ module MaintenanceOnSteroids
 
     def [](name)
       name = name.to_sym
-      @cache[name] ||= load_artifact(name)
+      # key? rather than ||= : a :blob artifact wraps to the raw data_blob,
+      # which is nil until something is written, and ||= would re-run the
+      # find_by on every read -- once per record inside a collection task.
+      return @cache[name] if @cache.key?(name)
+
+      @cache[name] = load_artifact(name)
     end
 
     # Explicit, immediate persist of a full artifact value -- the primary write

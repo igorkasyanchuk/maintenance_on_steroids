@@ -299,3 +299,28 @@ RSpec.describe MaintenanceOnSteroids::ArtifactsProxy do
     end
   end
 end
+
+RSpec.describe MaintenanceOnSteroids::ArtifactsProxy, "read caching" do
+  let(:run) { MaintenanceOnSteroids::Run.create!(task_class: "CsvExportTask", status: "running") }
+
+  def artifact_queries
+    count = 0
+    sub = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
+      count += 1 if payload[:sql].to_s.include?("maintenance_on_steroids_artifacts")
+    end
+    yield
+    count
+  ensure
+    ActiveSupport::Notifications.unsubscribe(sub)
+  end
+
+  it "does not re-query an unwritten blob artifact on every read" do
+    definitions = [MaintenanceOnSteroids::ArtifactDsl::ArtifactDefinition.new(:doc, type: :file)]
+    proxy = described_class.new(run, definitions)
+
+    queries = artifact_queries { 3.times { proxy[:doc] } }
+
+    expect(proxy[:doc]).to be_nil
+    expect(queries).to eq(1)
+  end
+end

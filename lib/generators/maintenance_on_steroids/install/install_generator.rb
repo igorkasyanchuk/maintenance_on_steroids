@@ -8,13 +8,17 @@ module MaintenanceOnSteroids
 
       source_root File.expand_path("templates", __dir__)
 
-      desc "Creates the migration for MaintenanceOnSteroids tables and mounts the engine."
+      desc "Creates the migration and initializer for MaintenanceOnSteroids and mounts the engine."
 
       def create_migration_file
         migration_template(
           "create_maintenance_on_steroids_tables.rb.erb",
           "db/migrate/create_maintenance_on_steroids_tables.rb"
         )
+      end
+
+      def create_initializer
+        template "initializer.rb", "config/initializers/maintenance_on_steroids.rb"
       end
 
       def create_maintenance_directory
@@ -32,13 +36,13 @@ module MaintenanceOnSteroids
         say ""
         say "Next steps:"
         say "  1. Run migrations: rails db:migrate"
-        say "  2. Create tasks in app/maintenance/"
-        say "  3. Visit /maintenance in your browser"
+        say "  2. Configure access control in config/initializers/maintenance_on_steroids.rb"
+        say "  3. Create tasks in app/maintenance/"
+        say "  4. Visit /maintenance in your browser"
         say ""
-        say "WARNING: the dashboard is mounted WITHOUT authentication by default.", :yellow
-        say "Configure auth in config/initializers/maintenance_on_steroids.rb", :yellow
-        say "(http_basic_authentication_enabled, authentication, verify_access_proc)", :yellow
-        say "before deploying to production.", :yellow
+        say "The dashboard is mounted WITHOUT access control until you configure it,", :yellow
+        say "and it can start any task against your database. In production the engine", :yellow
+        say "refuses to boot until one layer is set (or allow_insecure_dashboard = true).", :yellow
         say ""
       end
 

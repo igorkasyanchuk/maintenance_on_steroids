@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-21
+
+### Security
+
+- **The engine now refuses to boot in production with no access control.**
+  Every layer is opt-in and the dashboard can start any task against your
+  database, so an unconfigured install was silently wide open. HTTP Basic left
+  on the shipped `"secret"` password counts as *unconfigured* -- otherwise the
+  most dangerous setup would be the quietest one. Hosts that gate the dashboard
+  elsewhere (reverse proxy, VPN, middleware) opt out explicitly with
+  `config.allow_insecure_dashboard = true`. Outside production this warns
+  instead of raising.
+- **`maintenance_on_steroids:install` now generates the initializer**, with
+  each access-control layer laid out and commented.
+- **Select inputs are validated server-side.** A `<select>` only constrains the
+  browser; a posted value outside the declared `options` is now rejected
+  instead of being handed to the task.
+
+### Fixed
+
+- **Artifacts are no longer lost when a worker is interrupted.**
+  `ActiveJob::Continuation::Interrupt` subclasses `Exception`, so it was
+  invisible to `RunJob`'s `rescue` and buffered artifact rows written since the
+  job started were discarded on every SIGTERM/deploy while the cursor kept
+  advancing -- the run still reported `completed`. Flushing now happens in an
+  `ensure`, covering every exit path.
+- **`csv` is now a declared runtime dependency.** It left Ruby's default gems
+  in 3.4, and `csv_artifact.rb` requires it at load time, so the gem failed to
+  boot in host apps on Ruby >= 3.4 that did not list `csv` themselves.
+- **An errored run can be resumed from the dashboard.** A single transient
+  failure (deadlock, lock timeout) previously stranded a run mid-write with no
+  way to continue. `Run#resumable?` now covers `errored` as well as `paused`,
+  and resuming clears the previous error. The record that raised is retried;
+  records already past the cursor are not.
+- **`resume_errors_after_advancing` is disabled on `RunJob`.** Continuable was
+  re-enqueuing a job that this gem had already marked terminal, so the retry
+  fired, no-opped against the guard, and left the run looking retried but never
+  advancing.
+- **`Run#resume!` no longer strands a run in `enqueued`.** The status
+  compare-and-set happened before `enqueue!`, so a queue outage or a deleted
+  task class left the run enqueued with no job behind it (and 500'd the
+  controller). Enqueue failures now roll the run back to `errored`.
+- **An interrupted run is marked `enqueued` while it waits to be resumed**, so
+  `Run.reap_stale!` no longer mistakes its frozen `updated_at` for a dead
+  worker and kills a run that was about to continue.
+- **`RunJob` discards `ActiveRecord::RecordNotFound`** instead of retrying a
+  job for a deleted run ~21 times.
+- **Artifact downloads 404 for non-file artifacts** instead of returning a
+  200 with a zero-byte `.bin`.
+- **Inline artifact previews are capped** at `Artifact::PREVIEW_BYTES` (256 KB)
+  and report truncation. Parsing a multi-hundred-MB export to show its first
+  100 rows could exhaust the web process.
+- **Reading an unwritten `:file` artifact no longer re-queries** on every
+  access (once per record inside a collection task).
+- **`database_role` actually reaches the replica.** `collection` returns a lazy
+  `Relation`, so the documented `with_database_role(:read) { ... }` wrapper
+  restored the connection before a single row was fetched and the whole scan
+  ran on the primary. Declare it instead -- `job { database_role :reading }` --
+  and RunJob holds the role open for the entire scan, stepping back to
+  `:writing` for `process` and for its own cursor/progress writes.
+- **`pause!` and `cancel!` are compare-and-set**, like `resume!`. A pause
+  clicked as the job completed could overwrite `completed` with `pausing`,
+  which nothing but `reap_stale!` would ever clear.
+- **Oversized jsonb previews no longer generate the whole document** before
+  slicing it -- the structure is trimmed to `Artifact::PREVIEW_ENTRIES`
+  top-level entries first, which was the allocation the byte cap existed to
+  avoid.
+
+### Changed
+
+- The engine now warns at boot when **no** access control is configured
+  (`error` level in production). Previously only the partially-configured case
+  warned, leaving the fully open dashboard silent.
+- The dashboard stops polling once no run is active, instead of re-rendering
+  itself and its aggregate queries every 4 seconds indefinitely.
+- The highlight.js theme stylesheets on the source viewer are SRI-pinned, like
+  the script already was.
+- CI runs the suite against PostgreSQL as well as SQLite (`DB=postgres`), so
+  `json`/`bytea` behaviour and real row locking are covered. The install
+  generator has a spec.
+
 ## [0.1.0] - 2026-07-25
 
 Initial release.
@@ -56,5 +137,6 @@ Initial release.
 - Rails >= 8.1 (`ActiveJob::Continuable` ships in 8.1)
 - Ruby >= 3.2
 
-[Unreleased]: https://github.com/igorkasyanchuk/maintenance_on_steroids/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/maintenance_on_steroids/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/igorkasyanchuk/maintenance_on_steroids/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/igorkasyanchuk/maintenance_on_steroids/releases/tag/v0.1.0

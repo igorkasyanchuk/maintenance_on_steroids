@@ -7,6 +7,7 @@ on:
 
 jobs:
   test:
+    name: SQLite / Ruby ${{ matrix.ruby }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -26,3 +27,41 @@ jobs:
 
       - name: Build the gem
         run: gem build maintenance_on_steroids.gemspec
+
+  postgres:
+    name: PostgreSQL / Ruby 3.4
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB: postgres
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+
+      # json vs jsonb, bytea, and real row locking only show up here -- SQLite
+      # is far too forgiving about all three.
+      - name: Run specs against PostgreSQL
+        run: bundle exec rspec

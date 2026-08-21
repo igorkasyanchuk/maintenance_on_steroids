@@ -27,15 +27,26 @@ module MaintenanceOnSteroids
       @artifacts_proxy ||= ArtifactsProxy.new(@run, self.class.artifact_definitions)
     end
 
-    # Switch database role for the block
-    # Usage: with_database_role(:read) { User.all }
+    # Maps the friendly :read/:write aliases onto Active Record's role names.
+    def self.normalize_database_role(role)
+      case role.to_sym
+      when :read, :reading  then :reading
+      when :write, :writing then :writing
+      else role.to_sym
+      end
+    end
+
+    # Switch database role for the block.
+    # Usage: with_database_role(:read) { User.where(active: true).count }
+    #
+    # The block must force whatever it reads. Returning a lazy Relation from
+    # here does nothing -- the role is restored on the way out and the query
+    # runs later on the primary. To scan a `collection` against a replica,
+    # declare it instead so RunJob can hold the role open for the whole scan:
+    #
+    #   job { database_role :reading }
     def with_database_role(role, &block)
-      resolved = case role.to_sym
-                 when :read, :reading   then :reading
-                 when :write, :writing  then :writing
-                 else role.to_sym
-                 end
-      ActiveRecord::Base.connected_to(role: resolved, &block)
+      ActiveRecord::Base.connected_to(role: self.class.normalize_database_role(role), &block)
     end
 
     # Override in subclass: return an ActiveRecord::Relation for batch processing

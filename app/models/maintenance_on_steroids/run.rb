@@ -4,6 +4,10 @@ module MaintenanceOnSteroids
 
     STATUSES = %w[enqueued running pausing paused cancelling cancelled completed errored].freeze
     ACTIVE_STATUSES = %w[enqueued running pausing paused].freeze
+    # Statuses an operator may restart from. "errored" is included because a
+    # run that died on one bad record has already advanced its cursor -- the
+    # resumed job picks up after it rather than redoing the work.
+    RESUMABLE_STATUSES = %w[paused errored].freeze
     # Statuses that mean "a worker currently holds this run" -- candidates
     # for staleness reaping when the worker died without updating the row.
     STALE_CANDIDATE_STATUSES = %w[running pausing cancelling].freeze
@@ -47,7 +51,7 @@ module MaintenanceOnSteroids
     end
 
     def resumable?
-      status == "paused"
+      RESUMABLE_STATUSES.include?(status)
     end
 
     def cancellable?
@@ -119,26 +123,48 @@ module MaintenanceOnSteroids
       safe_instrument(:enqueued)
     end
 
+    # Compare-and-set, like #resume!: a check-then-update would let a pause
+    # clicked as the job finishes overwrite "completed" with "pausing", which
+    # nothing but reap_stale! would ever clear.
     # Returns true when the transition was performed, false otherwise.
     def pause!
-      return false unless running?
-
-      update!(status: "pausing")
-      true
+      claimed = self.class.where(id: id, status: "running").update_all(
+        status: "pausing",
+        updated_at: Time.current
+      ) == 1
+      reload if claimed
+      claimed
     end
 
     # Compare-and-set so two concurrent resumes can't both enqueue a job
     # for the same run. Returns true when this call won the transition.
+    # Raises if enqueuing fails -- callers surface that to the operator.
     def resume!
-      claimed = self.class.where(id: id, status: "paused").update_all(
+      claimed = self.class.where(id: id, status: RESUMABLE_STATUSES).update_all(
         status: "enqueued",
         active_job_id: nil,
+        completed_at: nil,
+        error_message: nil,
+        error_backtrace: nil,
         updated_at: Time.current
       ) == 1
       return false unless claimed
 
       reload
-      enqueue!
+      begin
+        enqueue!
+      rescue => e
+        # The CAS above already left "paused"/"errored", so a failure here
+        # (queue backend down, task class deleted) would strand the run in
+        # "enqueued" with no job behind it. Put it back in a terminal state
+        # the operator can act on.
+        update!(
+          status: "errored",
+          error_message: "Failed to enqueue: #{e.message}",
+          completed_at: Time.current
+        )
+        raise
+      end
       safe_instrument(:resumed)
       true
     end
@@ -148,12 +174,17 @@ module MaintenanceOnSteroids
     # via Active Job. RunJob#perform guards on terminal statuses, so a job
     # that still fires for a cancelled run is a no-op.
     def cancel!
-      if enqueued? || paused?
-        update!(status: "cancelled", completed_at: Time.current)
+      # Compare-and-set on each group, for the same reason as #pause!.
+      if self.class.where(id: id, status: %w[enqueued paused]).update_all(
+           status: "cancelled", completed_at: Time.current, updated_at: Time.current
+         ) == 1
+        reload
         safe_instrument(:cancelled)
         true
-      elsif running? || pausing?
-        update!(status: "cancelling")
+      elsif self.class.where(id: id, status: %w[running pausing]).update_all(
+              status: "cancelling", updated_at: Time.current
+            ) == 1
+        reload
         true
       else
         false

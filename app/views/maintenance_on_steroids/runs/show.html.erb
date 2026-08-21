@@ -155,16 +155,14 @@
         <% if defn&.description.present? %>
           <div class="artifact-desc"><%= defn.description %></div>
         <% end %>
-        <% if artifact.artifact_type == "jsonb" && artifact.data_jsonb.present? %>
+        <% if %w[jsonb text].include?(artifact.artifact_type) && (preview = artifact.preview_text).present? %>
           <div class="artifact-pre-wrap">
             <button type="button" class="btn btn-outline btn-sm copy-artifact-btn artifact-copy-overlay" data-copy-label="Copy">Copy</button>
-            <pre><%= JSON.pretty_generate(artifact.data_jsonb) %></pre>
+            <pre><%= preview %></pre>
           </div>
-        <% elsif artifact.artifact_type == "text" && artifact.data_text.present? %>
-          <div class="artifact-pre-wrap">
-            <button type="button" class="btn btn-outline btn-sm copy-artifact-btn artifact-copy-overlay" data-copy-label="Copy">Copy</button>
-            <pre><%= artifact.data_text %></pre>
-          </div>
+          <% if artifact.preview_truncated? %>
+            <div class="artifact-desc">Preview truncated &mdash; showing the first <%= number_to_human_size(MaintenanceOnSteroids::Artifact::PREVIEW_BYTES) %> of <%= artifact.human_size %>.</div>
+          <% end %>
         <% elsif artifact.artifact_type == "csv" && (rows = artifact.csv_rows).present? %>
           <div style="overflow-x: auto;">
             <table class="csv-preview">
@@ -177,8 +175,10 @@
               <% end %>
             </table>
           </div>
-          <% if rows.size > 100 %>
-            <div class="artifact-desc">Showing first 100 of <%= rows.size %> rows &mdash; download for the full file.</div>
+          <% if rows.size > 100 || artifact.preview_truncated? %>
+            <div class="artifact-desc">
+              Showing first <%= [rows.size, 100].min %> of <%= artifact.metadata&.dig("rows") || rows.size %> rows &mdash; download for the full file.
+            </div>
           <% end %>
         <% end %>
       </div>

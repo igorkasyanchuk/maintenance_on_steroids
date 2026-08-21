@@ -47,9 +47,16 @@ module MaintenanceOnSteroids
   #   MaintenanceOnSteroids.http_basic_authentication_enabled   = true
   #   MaintenanceOnSteroids.http_basic_authentication_user_name = "admin"
   #   MaintenanceOnSteroids.http_basic_authentication_password  = Rails.application.credentials.maintenance_password
+  # Shipped placeholders. Leaving the password at its default is treated as
+  # *no* access control -- a dashboard behind "admin"/"secret" is not
+  # protected, and counting it as configured would make the most dangerous
+  # setup quieter than an unconfigured one.
+  DEFAULT_HTTP_BASIC_USER_NAME = "admin"
+  DEFAULT_HTTP_BASIC_PASSWORD  = "secret"
+
   mattr_accessor :http_basic_authentication_enabled, default: false
-  mattr_accessor :http_basic_authentication_user_name, default: "admin"
-  mattr_accessor :http_basic_authentication_password, default: "secret"
+  mattr_accessor :http_basic_authentication_user_name, default: DEFAULT_HTTP_BASIC_USER_NAME
+  mattr_accessor :http_basic_authentication_password, default: DEFAULT_HTTP_BASIC_PASSWORD
 
   # Controller-based access verification.
   # Receives the controller instance. Return true to allow, false to deny.
@@ -69,9 +76,71 @@ module MaintenanceOnSteroids
   #   }
   mattr_accessor :authentication, default: nil
 
+  # Escape hatch for hosts that gate the dashboard somewhere this gem cannot
+  # see (reverse proxy, VPN, Rack middleware). Set it to boot in production
+  # without configuring any of the layers above -- an explicit, greppable
+  # statement that the exposure is intentional.
+  mattr_accessor :allow_insecure_dashboard, default: false
+
+  # Raised at boot when the dashboard would be reachable with no access
+  # control in production.
+  class InsecureDashboardError < StandardError; end
+
   class << self
     def configure
       yield self
+    end
+
+    # True when HTTP Basic is on *and* its password was actually changed.
+    def http_basic_authentication_configured?
+      http_basic_authentication_enabled &&
+        http_basic_authentication_password.to_s != DEFAULT_HTTP_BASIC_PASSWORD
+    end
+
+    # True when at least one access-control layer is meaningfully configured.
+    def access_control_configured?
+      return true if authentication || verify_access_proc
+
+      http_basic_authentication_configured?
+    end
+
+    # Called from the engine's after_initialize. Raises in production unless
+    # the host opted in via allow_insecure_dashboard; warns everywhere else.
+    def verify_access_control!(logger: Rails.logger, env: Rails.env)
+      if access_control_configured?
+        # An authentication hook alone only verifies *who* the user is --
+        # without verify_access_proc every authenticated user gets in.
+        if authentication && verify_access_proc.nil?
+          logger&.warn(
+            "[MaintenanceOnSteroids] `authentication` is configured without `verify_access_proc`: " \
+            "any authenticated user can access the maintenance dashboard. Set " \
+            "MaintenanceOnSteroids.verify_access_proc to restrict access (unless your " \
+            "authentication hook already enforces authorization)."
+          )
+        end
+        return
+      end
+
+      reason =
+        if http_basic_authentication_enabled
+          "HTTP Basic is enabled but still uses the shipped default password"
+        else
+          "no access control is configured"
+        end
+
+      message =
+        "[MaintenanceOnSteroids] Refusing to boot: #{reason}. Anyone who can reach the mounted " \
+        "dashboard could view every task, read its source, and start runs against this database. " \
+        "Set http_basic_authentication_password (to something other than the default), " \
+        "authentication, or verify_access_proc in config/initializers/maintenance_on_steroids.rb. " \
+        "If the dashboard is already protected elsewhere (reverse proxy, VPN, middleware), set " \
+        "MaintenanceOnSteroids.allow_insecure_dashboard = true to acknowledge that."
+
+      if env.production? && !allow_insecure_dashboard
+        raise InsecureDashboardError, message
+      end
+
+      logger&.warn(message.sub("Refusing to boot: ", ""))
     end
 
     # Discover all task classes defined in the host app

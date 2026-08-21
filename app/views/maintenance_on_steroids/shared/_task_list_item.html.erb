@@ -12,11 +12,12 @@
     </div>
   </div>
   <div style="text-align: right;">
-    <% active_count = local_assigns.fetch(:active_count) { MaintenanceOnSteroids::Run.where(task_class: task_class.name).active.count } %>
+    <%# active_count / last_run are required locals, preloaded by the caller.
+        Falling back to a per-row query here would silently reintroduce the
+        N+1 that JobsController#index preloads against. %>
     <% if active_count > 0 %>
       <span class="badge badge-running"><%= active_count %> active</span>
     <% end %>
-    <% last_run = local_assigns.fetch(:last_run) { MaintenanceOnSteroids::Run.where(task_class: task_class.name).recent.first } %>
     <% if last_run %>
       <div class="task-meta" style="margin-top: 4px; white-space: nowrap;">
         Last run:

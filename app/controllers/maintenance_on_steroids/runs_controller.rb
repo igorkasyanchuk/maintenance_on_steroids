@@ -13,6 +13,12 @@ module MaintenanceOnSteroids
         return render :new, status: :unprocessable_entity
       end
 
+      invalid = invalid_select_inputs
+      if invalid.any?
+        flash.now[:alert] = "Invalid value for: #{invalid.map(&:label).join(', ')}."
+        return render :new, status: :unprocessable_entity
+      end
+
       oversized = oversized_file_inputs
       if oversized.any?
         max_mb = MaintenanceOnSteroids.max_upload_size / (1024 * 1024)
@@ -71,6 +77,10 @@ module MaintenanceOnSteroids
       else
         redirect_to run_path(@run), alert: "Task cannot be resumed (status: #{@run.reload.status})."
       end
+    rescue => e
+      # Run#resume! already rolled the run back to a terminal status; show the
+      # operator why instead of a 500 (mirrors the enqueue guard in #create).
+      redirect_to run_path(@run), alert: "Run could not be enqueued: #{e.message}"
     end
 
     def cancel
@@ -100,6 +110,11 @@ module MaintenanceOnSteroids
 
     def artifact_download
       artifact = @run.artifacts.find(params[:artifact_id])
+      # jsonb/text artifacts have no data_blob -- without this the response is
+      # a 200 carrying a zero-byte ".bin", which reads as "the task produced
+      # nothing" rather than "this artifact isn't a file".
+      raise ActiveRecord::RecordNotFound, "Artifact #{artifact.id} is not downloadable" unless artifact.downloadable?
+
       send_data artifact.data_blob,
                 filename: artifact.download_file_name,
                 type: artifact.download_content_type,
@@ -123,6 +138,16 @@ module MaintenanceOnSteroids
       @task_class.form_inputs.select(&:required).select do |input|
         value = params.dig(:task_params, input.name)
         input.blob? ? !value.respond_to?(:read) : value.blank?
+      end
+    end
+
+    # A <select> only constrains the browser -- the posted value is whatever the
+    # client sends. Anything outside the declared options is rejected rather
+    # than handed to the task.
+    def invalid_select_inputs
+      @task_class.form_inputs.select { |i| i.type == :select && i.options.present? }.select do |input|
+        value = params.dig(:task_params, input.name)
+        value.present? && input.options.map(&:to_s).exclude?(value.to_s)
       end
     end
 

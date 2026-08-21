@@ -6,8 +6,9 @@ module MaintenanceOnSteroids
       attr_reader :queue_name
 
       def initialize
-        @queue_name = nil
-        @priority   = nil
+        @queue_name     = nil
+        @priority       = nil
+        @database_role  = nil
       end
 
       def queue(name)
@@ -19,6 +20,18 @@ module MaintenanceOnSteroids
         return @priority if value == :__unset__
 
         @priority = value
+      end
+
+      # Database role the collection is read under, e.g. `database_role :reading`
+      # to scan a replica. Declared rather than block-scoped because a
+      # `collection` is a lazy Relation: wrapping the method body in
+      # connected_to switches back before the query ever runs. RunJob holds the
+      # role open for the whole scan instead, and runs `process` plus its own
+      # bookkeeping under :writing. Acts as setter and reader.
+      def database_role(value = :__unset__)
+        return @database_role if value == :__unset__
+
+        @database_role = MaintenanceOnSteroids::Task.normalize_database_role(value)
       end
     end
 

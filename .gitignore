@@ -10,3 +10,4 @@ spec/dummy/log/
 spec/dummy/tmp/
 .ruby-lsp/
 .claude/
+tmp/
