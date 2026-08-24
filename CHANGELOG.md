@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-24
+
+First version published to RubyGems. The 0.1.1 and 0.1.0 entries below are
+development milestones -- neither was tagged or released, so no one ever ran
+them. The minor bump reflects the four public APIs added since 0.1.1.
+
+### Security
+
+- **A blank HTTP Basic password no longer counts as configured.** The check
+  added in 0.1.1 compared only against the shipped `"secret"`, so a nil
+  password -- the result of a missing or misspelled credentials key, which is
+  exactly the pattern the generated initializer recommends -- passed as
+  configured, booted production without a warning, and let `admin` plus an
+  empty password through, because `secure_compare(supplied, "")` matches. Blank
+  is now treated as unconfigured, and the controller refuses to authenticate at
+  all while the configured password is blank.
+
 ### Added
 
 - **`Run.prune!(older_than:)`** deletes finished runs and their artifacts.
@@ -35,30 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Task.descendants`, so the registry's sweep re-registered stale copies after
   a development code reload. The sweep now skips any class its own constant no
   longer resolves to.
-
-### Changed
-
-- The install migration now picks **`jsonb` on PostgreSQL** (`json` elsewhere)
-  for the three JSON columns, resolved against the connection at migrate time.
-  Existing installs are unaffected; convert with your own migration if you want
-  the indexable type.
-- README documents the operational limits that were previously implicit:
-  artifact buffering and size caps, pruning, callable-task pause behaviour,
-  concurrent runs, the Content Security Policy requirement for live updates,
-  and why collections with random UUID primary keys are unsafe to resume.
-
-### Security
-
-- **A blank HTTP Basic password no longer counts as configured.** The check
-  added in 0.1.1 compared only against the shipped `"secret"`, so a nil
-  password -- the result of a missing or misspelled credentials key, which is
-  exactly the pattern the generated initializer recommends -- passed as
-  configured, booted production without a warning, and let `admin` plus an
-  empty password through, because `secure_compare(supplied, "")` matches. Blank
-  is now treated as unconfigured, and the controller refuses to authenticate at
-  all while the configured password is blank.
-
-### Fixed
 
 - **Artifact previews no longer crash the run page on non-ASCII content.**
   Two separate encoding faults: `data_blob` is ASCII-8BIT, so interpolating a
@@ -97,6 +90,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The install migration now picks **`jsonb` on PostgreSQL** (`json` elsewhere)
+  for the three JSON columns, resolved against the connection at migrate time.
+  Existing installs are unaffected; convert with your own migration if you want
+  the indexable type.
+- README documents the operational limits that were previously implicit:
+  artifact buffering and size caps, pruning, callable-task pause behaviour,
+  concurrent runs, the Content Security Policy requirement for live updates,
+  and why collections with random UUID primary keys are unsafe to resume.
+
 - `pg` moved to an optional bundler group, so the resolved bundle no longer
   depends on `DB` being set in the shell; switching between the SQLite and
   PostgreSQL suites no longer needs a re-install.
@@ -106,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Connection values in the dummy app's `database.yml` are quoted, so a password
   containing `:`, `#`, `%` or `@` no longer produces a YAML syntax error.
 
-## [0.1.1] - 2026-08-21
+## 0.1.1 - 2026-08-21 (unreleased)
 
 ### Security
 
@@ -187,7 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `json`/`bytea` behaviour and real row locking are covered. The install
   generator has a spec.
 
-## [0.1.0] - 2026-07-25
+## 0.1.0 - 2026-07-25 (unreleased)
 
 Initial release.
 
@@ -236,6 +238,5 @@ Initial release.
 - Rails >= 8.1 (`ActiveJob::Continuable` ships in 8.1)
 - Ruby >= 3.2
 
-[Unreleased]: https://github.com/igorkasyanchuk/maintenance_on_steroids/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/igorkasyanchuk/maintenance_on_steroids/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/igorkasyanchuk/maintenance_on_steroids/releases/tag/v0.1.0
+[Unreleased]: https://github.com/igorkasyanchuk/maintenance_on_steroids/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/igorkasyanchuk/maintenance_on_steroids/releases/tag/v0.2.0
