@@ -10,6 +10,7 @@ class CreateMaintenanceOnSteroidsTables < ActiveRecord::Migration<%= migration_v
       t.text    :error_message
       t.text    :error_backtrace
       t.string  :active_job_id
+      t.string  :execution_token
       t.string  :user_id
       t.string  :user_type
       t.string  :user_email

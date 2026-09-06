@@ -30,6 +30,7 @@ ActiveRecord::Schema[8.1].define(version: 0) do
 
   create_table "maintenance_on_steroids_runs", force: :cascade do |t|
     t.string "active_job_id"
+    t.string "execution_token"
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.string "cursor"

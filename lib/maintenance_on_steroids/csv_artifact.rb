@@ -16,6 +16,7 @@ module MaintenanceOnSteroids
       @headers = headers
       @rows    = []
       @dirty   = false
+      @buffer_bytes = record.data_blob&.bytesize || (headers ? CSV.generate_line(headers).bytesize : 0)
 
       if record.data_blob.present?
         # A corrupted/partially-written blob must not abort a resume -- start
@@ -38,7 +39,11 @@ module MaintenanceOnSteroids
     end
 
     def <<(row)
-      @rows << Array(row)
+      row = Array(row)
+      bytes = CSV.generate_line(row).bytesize
+      @record.check_buffer_size!(@buffer_bytes + bytes)
+      @rows << row
+      @buffer_bytes += bytes
       @dirty = true
       self
     end

@@ -34,7 +34,9 @@ module MaintenanceOnSteroids
     #   end
     #
     # When a stop is pending this does not return -- the job unwinds and the
-    # run lands in "paused" or "cancelled". No-op outside a job.
+    # run lands in "paused" or "cancelled". Callable checkpoints also flush
+    # output and refresh the heartbeat; they do not persist a position in call.
+    # No-op outside a job.
     def checkpoint!
       @checkpoint_handler&.call
     end

@@ -2,11 +2,14 @@ module MaintenanceOnSteroids
   class Run < ApplicationRecord
     has_many :artifacts, dependent: :destroy
 
+    # Set only on the worker's instance, never accepted from request parameters.
+    attr_accessor :worker_token
+
     STATUSES = %w[enqueued running pausing paused cancelling cancelled completed errored].freeze
     ACTIVE_STATUSES = %w[enqueued running pausing paused].freeze
     # Statuses an operator may restart from. "errored" is included because a
-    # run that died on one bad record has already advanced its cursor -- the
-    # resumed job picks up after it rather than redoing the work.
+    # run that failed can resume after its last committed checkpoint, retrying
+    # the failed record and any effects it made before checkpointing.
     RESUMABLE_STATUSES = %w[paused errored].freeze
     # Statuses that mean "a worker currently holds this run" -- candidates
     # for staleness reaping when the worker died without updating the row.
@@ -27,17 +30,22 @@ module MaintenanceOnSteroids
     # Transitions runs stuck in an in-flight status to "errored" when the row
     # hasn't been touched for `threshold`. RunJob updates the row at least
     # once per processed record, so updated_at acts as a heartbeat. Call this
-    # periodically (cron, recurring job) to recover from worker crashes.
+    # periodically (cron, recurring job) to recover from worker crashes. Queued
+    # runs are included only with an explicit enqueued_threshold longer than
+    # normal queue latency. Revoking the token fences out a surviving worker.
     # Returns the number of reaped runs.
-    def self.reap_stale!(threshold: 30.minutes)
-      where(status: STALE_CANDIDATE_STATUSES)
-        .where(updated_at: ...threshold.ago)
-        .update_all(
-          status: "errored",
-          error_message: "Run marked as stale: no progress for over #{threshold.inspect}. The worker likely crashed.",
-          completed_at: Time.current,
-          updated_at: Time.current
-        )
+    def self.reap_stale!(threshold: 30.minutes, enqueued_threshold: nil)
+      stale = where(status: STALE_CANDIDATE_STATUSES).where(updated_at: ...threshold.ago)
+      if enqueued_threshold
+        stale = stale.or(where(status: "enqueued").where(updated_at: ...enqueued_threshold.ago))
+      end
+      stale.update_all(
+        status: "errored",
+        execution_token: nil,
+        error_message: "Run marked as stale: no progress before the configured timeout. The worker or dispatch may have failed.",
+        completed_at: Time.current,
+        updated_at: Time.current
+      )
     end
 
     # Deletes finished runs older than `older_than`, with their artifacts.
@@ -134,17 +142,52 @@ module MaintenanceOnSteroids
     end
 
     def task_instance
-      @task_instance ||= task_class.constantize.new(self)
+      @task_instance ||= begin
+        klass = JobRegistry.find(task_class)
+        raise ArgumentError, "Unknown maintenance task: #{task_class}" unless klass
+        klass.new(self)
+      end
     end
 
-    def enqueue!
+    def enqueue!(job_id: SecureRandom.uuid)
+      previous_backtrace = error_backtrace
       job_config = task_instance.class.job_config
       job = RunJob.new(id)
+      job.job_id = job_id
+      job.enqueue_failure_backtrace = previous_backtrace
       job.queue_name = job_config.queue_name if job_config.queue_name
       job.priority = job_config.priority if job_config.priority
-      job.enqueue
-      update!(active_job_id: job.job_id)
+
+      with_lock do
+        return false unless enqueued? && execution_token.nil? && (active_job_id.nil? || active_job_id == job_id)
+        # Publish the attempt identity and reset metadata before a worker can run.
+        update!(active_job_id: job_id, completed_at: nil, error_message: nil, error_backtrace: nil)
+      end
+      unless job.enqueue
+        raise EnqueueFailed, job.enqueue_error&.message || "Enqueue callback aborted the job"
+      end
       safe_instrument(:enqueued)
+      true
+    rescue => e
+      # A fast worker may already have completed or failed. Never overwrite it,
+      # or a newer attempt, when dispatch reports an error.
+      self.class.where(id: id, status: "enqueued", execution_token: nil, active_job_id: [nil, job_id]).update_all(
+        status: "errored", error_message: "Failed to enqueue: #{e.message}",
+        error_backtrace: previous_backtrace, completed_at: Time.current, updated_at: Time.current
+      )
+      reload
+      raise EnqueueFailed, e.message
+    end
+
+    # All worker bookkeeping and buffered output commits are fenced by this
+    # token. The lock is short-lived; task side effects happen outside it.
+    def with_execution_lock
+      with_lock do
+        unless worker_token && execution_token == worker_token && STALE_CANDIDATE_STATUSES.include?(status)
+          raise ExecutionLost, "Run #{id} no longer belongs to this worker"
+        end
+        yield
+      end
     end
 
     # Compare-and-set, like #resume!: a check-then-update would let a pause
@@ -164,34 +207,17 @@ module MaintenanceOnSteroids
     # for the same run. Returns true when this call won the transition.
     # Raises EnqueueFailed if the job could not be queued.
     def resume!
+      job_id = SecureRandom.uuid
       claimed = self.class.where(id: id, status: RESUMABLE_STATUSES).update_all(
         status: "enqueued",
-        active_job_id: nil,
+        active_job_id: job_id,
+        execution_token: nil,
         updated_at: Time.current
       ) == 1
       return false unless claimed
 
       reload
-      begin
-        enqueue!
-      rescue => e
-        # The CAS above already left "paused"/"errored", so a failure here
-        # (queue backend down, task class deleted) would strand the run in
-        # "enqueued" with no job behind it. Put it back in a terminal state
-        # the operator can act on, keeping error_backtrace so the original
-        # failure is still on the page.
-        update!(
-          status: "errored",
-          error_message: "Failed to enqueue: #{e.message}",
-          completed_at: Time.current
-        )
-        raise EnqueueFailed, e.message
-      end
-
-      # Cleared only now that the run is really on its way again -- doing it in
-      # the CAS above would destroy the original error before we know whether
-      # the resume even succeeds.
-      update_columns(completed_at: nil, error_message: nil, error_backtrace: nil)
+      return false unless enqueue!(job_id: job_id)
       safe_instrument(:resumed)
       true
     end
@@ -247,14 +273,14 @@ module MaintenanceOnSteroids
     end
 
     def task_title
-      klass = task_class.safe_constantize
+      klass = JobRegistry.find(task_class)
       klass&.task_title || task_class
     rescue
       task_class
     end
 
     def task_exists?
-      task_class.safe_constantize.present?
+      JobRegistry.find(task_class).present?
     rescue
       false
     end

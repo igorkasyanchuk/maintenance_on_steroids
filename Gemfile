@@ -17,3 +17,5 @@ gem "puma"
 gem "csv"
 gem "devise"
 gem "any_login"
+gem "bundler-audit", require: false
+gem "brakeman", require: false

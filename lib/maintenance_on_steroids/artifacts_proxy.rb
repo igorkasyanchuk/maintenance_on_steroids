@@ -47,17 +47,25 @@ module MaintenanceOnSteroids
     # (dirty), so merely reading an artifact never creates a phantom row.
     # Called automatically by RunJob at completion and on pause/cancel.
     def flush!
+      failure = nil
       @cache.each_pair do |name, cached|
         next unless cached.respond_to?(:dirty?) && cached.dirty?
 
         begin
           cached.save!
         rescue => e
+          failure ||= e
           # One artifact failing to persist must not strand the others -- log
           # the declared name (always available) and keep flushing the rest.
           Rails.logger.error "[MaintenanceOnSteroids] Artifact flush error (#{name}): #{e.class}: #{e.message}"
         end
       end
+      raise failure if failure
+    end
+
+    # Drop uncommitted buffers after a record/checkpoint transaction failed.
+    def discard!
+      @cache.clear
     end
 
     # Method-style access for declared artifacts so call sites read naturally:
@@ -98,6 +106,7 @@ module MaintenanceOnSteroids
         # A concurrent writer created the row first (unique index on
         # run_id/name/kind) -- write into the existing record instead.
         record = @run.artifacts.find_by!(name: name.to_s, kind: "output")
+        record.worker_token = @run.worker_token
         record.artifact_type = definition.storage_type.to_s
         write_value(record, definition, value)
         record.refresh_metadata!
@@ -116,6 +125,7 @@ module MaintenanceOnSteroids
       # on first save! / assignment. (update! on a new record saves it.)
       record = @run.artifacts.find_by(name: name.to_s, kind: "output")
       record ||= build_record(name, definition, storage)
+      record.worker_token = @run.worker_token
 
       wrap(record, definition)
     end
@@ -137,6 +147,7 @@ module MaintenanceOnSteroids
     def find_or_create_record(name, definition)
       @run.artifacts.find_or_initialize_by(name: name.to_s, kind: "output").tap do |r|
         r.artifact_type = definition.storage_type.to_s
+        r.worker_token = @run.worker_token
       end
     end
 

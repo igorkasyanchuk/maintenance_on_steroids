@@ -1,6 +1,7 @@
 require "rails_helper"
 
 RSpec.describe MaintenanceOnSteroids::RunJob, type: :job do
+  include ActiveJob::TestHelper
   def create_users(count, name: "Alice")
     count.times do |i|
       User.create!(
@@ -231,8 +232,9 @@ RSpec.describe MaintenanceOnSteroids::RunJob, type: :job do
       expect(StartCountingTask.start_count).to eq(1)
 
       # Simulate a resumption: run already has started_at, goes back to enqueued
-      run.reload.update!(status: "enqueued")
-      described_class.perform_now(run.id)
+      run.reload.update!(status: "paused")
+      run.resume!
+      perform_enqueued_jobs
 
       expect(StartCountingTask.start_count).to eq(1)
       expect(run.reload.status).to eq("completed")
@@ -313,8 +315,8 @@ RSpec.describe MaintenanceOnSteroids::RunJob, type: :job do
       expect(processed_ids).to eq([all_ids.first])
 
       # Resume: process the remaining records exactly once.
-      run.update!(status: "enqueued")
-      described_class.perform_now(run.id)
+      run.resume!
+      perform_enqueued_jobs
 
       run.reload
       expect(run.status).to eq("completed")

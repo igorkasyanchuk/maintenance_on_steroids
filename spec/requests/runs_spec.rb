@@ -67,7 +67,8 @@ RSpec.describe "Runs", type: :request do
     end
 
     it "marks the run errored when enqueueing fails" do
-      allow_any_instance_of(MaintenanceOnSteroids::Run).to receive(:enqueue!).and_raise("queue down")
+      allow(MaintenanceOnSteroids::RunJob.queue_adapter).to receive(:enqueue)
+        .and_raise(ActiveJob::EnqueueError, "queue down")
 
       post "/maintenance/jobs/UpdateUsersTask/runs", params: {
         task_params: { name: "Alice", age: "30" }

@@ -85,6 +85,20 @@ RSpec.describe "RunJob interruption", type: :job do
       .not_to change { run.reload.status }
   end
 
+  it "surfaces a refused Continuable retry as an actionable run error" do
+    create_users(5)
+    run = run_for
+    allow(MaintenanceOnSteroids::RunJob.queue_adapter).to receive(:enqueue_at)
+      .and_raise(ActiveJob::EnqueueError, "retry queue down")
+
+    interrupt_after_third_record(run)
+
+    expect(run.reload.status).to eq("errored")
+    expect(run.execution_token).to be_nil
+    expect(run.error_message).to include("retry queue down")
+    expect(run.progress_current).to eq(3)
+  end
+
   it "leaves a pause requested before the interruption intact" do
     create_users(5)
     run = run_for

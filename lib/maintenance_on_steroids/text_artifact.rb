@@ -17,18 +17,20 @@ module MaintenanceOnSteroids
 
     # Append text
     def <<(text)
-      @value << text.to_s
+      text = text.to_s
+      @record.check_buffer_size!(@value.bytesize + text.bytesize)
+      @value << text
       self
     end
 
     # Append a line (adds newline)
     def puts(text = "")
-      @value << text.to_s << "\n"
-      self
+      self << "#{text}\n"
     end
 
     # Replace all text
     def replace(text)
+      @record.check_buffer_size!(text.to_s.bytesize)
       @value = text.to_s
       self
     end

@@ -388,3 +388,13 @@ RSpec.describe MaintenanceOnSteroids::Run, type: :model do
     end
   end
 end
+
+RSpec.describe MaintenanceOnSteroids::Run, "abandoned dispatch recovery" do
+  it "only expires queued runs when a queue timeout is explicitly supplied" do
+    run = described_class.create!(task_class: "SimpleCallableTask", updated_at: 2.days.ago)
+    expect(described_class.reap_stale!).to eq(0)
+    expect(described_class.reap_stale!(enqueued_threshold: 1.day)).to eq(1)
+    expect(run.reload.status).to eq("errored")
+    expect(run.resumable?).to eq(true)
+  end
+end

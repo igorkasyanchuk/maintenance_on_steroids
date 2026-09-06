@@ -7,12 +7,12 @@ A powerful maintenance task runner for **Rails 8.1+** that leverages `ActiveJob:
 **Built-in web dashboard** with dark/light themes, live progress tracking, pause/resume/cancel controls, source code viewer, and artifact downloads.
 
 > [!IMPORTANT]
-> **Requires Rails >= 8.1 and Ruby >= 3.2.** Resumption is built on `ActiveJob::Continuable`, which ships in Rails 8.1 — the gem will not install on earlier Rails versions.
+> **Requires Rails >= 8.1.3.1, < 9 and Ruby >= 3.2.** Resumption uses `ActiveJob::Continuable`. The minimum Rails patch includes security fixes; keep your host application's full bundle patched too.
 
 ## Features
 
 - **Collection & callable tasks** -- iterate over ActiveRecord relations or run one-off jobs
-- **Automatic resumption** -- cursor-based progress tracking survives Sidekiq restarts and pause/resume cycles without reprocessing records
+- **Automatic resumption** -- cursor-based progress tracking resumes from the last committed checkpoint; tasks must tolerate retries
 - **Rich DSL** -- typed form inputs, named artifacts, lifecycle callbacks, queue configuration, task metadata
 - **Live dashboard** -- auto-refreshing stats and active runs, real-time progress bars, status badges, run history, and source code viewer
 - **Estimated time remaining** -- live ETA for pending records, extrapolated from the current processing rate
@@ -25,7 +25,7 @@ A powerful maintenance task runner for **Rails 8.1+** that leverages `ActiveJob:
 
 ## Requirements
 
-- **Rails >= 8.1** — hard requirement; resumption depends on `ActiveJob::Continuable`, introduced in Rails 8.1
+- **Rails >= 8.1.3.1, < 9** — resumption depends on `ActiveJob::Continuable`
 - **Ruby >= 3.2**
 
 ## Installation
@@ -48,6 +48,10 @@ This will:
 1. Create the database migration for runs and artifacts tables
 2. Create the `app/maintenance/` directory for your task classes
 3. Mount the engine at `/maintenance` in your routes
+
+Update and audit the host application's complete bundle, including Rack and
+other transitive dependencies. This gem does not ship a lockfile; the security
+scans in this repository check its development bundle, not your host's versions.
 
 ## Quick Start
 
@@ -138,7 +142,7 @@ class DeactivateOldUsers < MaintenanceOnSteroids::Task
 end
 ```
 
-The engine iterates over records using `find_each`, tracks progress automatically, and persists a cursor after each record. If the job is interrupted (Sidekiq restart, pause, or deploy), it resumes from exactly where it left off -- **no records are processed twice**.
+The engine iterates using `find_each` and commits a cursor and accumulated output after each record. Resumption starts after that checkpoint. Processing is **at least once**: a crash after a task side effect but before its checkpoint can repeat that record, so make task effects idempotent.
 
 ### Callable tasks
 
@@ -323,7 +327,7 @@ def call
 end
 ```
 
-**Auto-flush:** this backs the **accumulator** style only -- you don't need to call `artifacts[:x].save!` yourself. Any artifact mutated in memory (`<<`, in-place hash writes) is automatically persisted by the job when the run completes (after `after_complete` callbacks run, so a final aggregate computed there is captured) and when a run is paused or cancelled mid-flight (so in-progress output is never lost). Reads alone never create a record. `artifacts.save(name, value)` already wrote immediately, so it never depends on auto-flush; you can also call `save!` explicitly on an accumulator artifact for intermediate checkpoints.
+**Auto-flush:** collection tasks commit mutated accumulators together with each record's cursor. Callable tasks flush at `checkpoint!` and on completion or interruption. Completion callbacks can produce final output; it is saved before the run becomes `completed` and before the success notification. Pause/cancel callbacks likewise run before the final state is committed. Persistence failures mark the run `errored`; failed collection-record buffers are discarded. Reads alone never create a row. Explicit `artifacts.save` / `save!` writes happen immediately and are not coupled to the collection cursor, so use accumulators for checkpointed exports.
 
 **Metadata:** every artifact records lightweight stats on save -- entry/line count, byte size, and a generated-at timestamp -- shown on the run page (`12 entries · 3.4 KB · 2 minutes ago`) without loading the full payload. Available on the model via `artifact.summary`, `artifact.byte_size`, and `artifact.generated_at`.
 
@@ -610,14 +614,25 @@ The UI supports dark and light themes. Click the sun/moon toggle in the top bar.
 This gem uses Rails 8.1's `ActiveJob::Continuable` for safe background processing:
 
 1. **Collection tasks** iterate over records using `find_each`, ordered by primary key
-2. After processing each record, the cursor (primary key) is saved both to `ActiveJob::Continuable`'s step and to the database
+2. After processing each record, accumulated output and the database cursor commit in one transaction, then `ActiveJob::Continuable`'s step cursor advances
 3. If Sidekiq restarts mid-job, `ActiveJob::Continuable` resumes from its last cursor
 4. If you pause and resume, a new job is enqueued that reads the cursor from the database
 5. In both cases, the query uses `WHERE id > cursor` to skip already-processed records
 
-**No record is skipped, and only a failed record is retried.** The cursor advances only *after* `process` returns, so an interruption or a pause replays nothing already done, while a record that raised is retried on the next resume (at-least-once for that record). The suite verifies this across Sidekiq restarts, pause/resume cycles, and multiple interruptions.
+**Task side effects are at least once.** A record whose checkpoint committed is skipped on resume. A crash after a database/API side effect but before the checkpoint can repeat that side effect. Use idempotent updates or a durable deduplication key for external operations. The engine cannot make another database or service commit atomically with its cursor.
 
-Artifacts buffered in memory are flushed on every exit path -- completion, pause, cancel, error, and worker interruption -- so a deploy mid-run never silently truncates a CSV or log artifact.
+Collection accumulator output and its cursor survive together, including hard
+worker death. Output from an unfinished record is discarded and that record is
+retried. Callable tasks restart `call` on manual resume; `checkpoint!` saves output
+and updates the heartbeat, but does not remember a position inside your method.
+Persist your own callable work position and make retries safe. Hard termination
+can lose callable output since its last checkpoint.
+
+Each worker atomically claims a run with an execution token. Duplicate deliveries
+and stale job IDs cannot claim it. Reaping revokes that token; an old worker stops
+at its next checkpoint and cannot overwrite engine progress or artifacts. A
+currently executing external side effect cannot be recalled, so set reaper
+thresholds conservatively.
 
 > **Note:** cursor-based resumption relies on monotonically increasing primary keys. Collections with UUID/string primary keys can skip or repeat records on resume -- the job logs a warning when it detects one.
 
@@ -632,11 +647,25 @@ If a worker process dies hard (OOM kill, `kill -9`, node failure), its run can b
 MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes)
 ```
 
-Pick a threshold comfortably larger than the time your slowest task needs to process a single record. `enqueued` and `paused` runs are never reaped -- and a run interrupted by `ActiveJob::Continuable` is moved back to `enqueued` before its job is re-queued, so a backed-up queue can never get it reaped out from under the worker.
+Pick a threshold comfortably larger than the time your slowest record or callable
+checkpoint interval takes. `checkpoint!` refreshes a callable's heartbeat.
+Inside a collection's `process`, it refreshes the heartbeat and checks ownership;
+pause/cancel waits until that record finishes, keeping output and cursor together.
+`enqueued` and `paused` runs are excluded by default. To recover a process crash
+between saving a run and dispatching its job, opt into an enqueue timeout longer
+than your maximum queue delay:
+
+```ruby
+MaintenanceOnSteroids::Run.reap_stale!(threshold: 30.minutes, enqueued_threshold: 1.day)
+```
+
+An expired queued job is ignored unless an operator resumes the run, which
+creates a new job identity. Queue submission failures, including refused
+Continuable retries, are surfaced as `errored`.
 
 ### Recovering from a failed run
 
-A run that raises is marked `errored` and stops, with the message and backtrace on the run page. Because the cursor was persisted after each successful record, you can fix the cause and hit **Resume**: the run picks up from the record that failed and reprocesses nothing before it. Resuming clears the stored error.
+A run that raises is marked `errored` and stops, with the message and backtrace on the run page. Fix the cause and hit **Resume** to restart after the last committed checkpoint. Uncheckpointed effects can be repeated. Resuming prepares fresh metadata before dispatch, preserving any new worker error even if that worker finishes immediately.
 
 ### Pruning old runs
 
@@ -658,10 +687,12 @@ row.** That makes them ideal for maintenance *results* — a summary, a log, a
 few thousand rows of exceptions — and unsuitable as a bulk-export pipeline.
 A million-row CSV will exhaust the worker before it ever reaches the database.
 
-`MaintenanceOnSteroids.max_artifact_size` (default 64 MB) turns that into a
-clear failure instead of an OOM kill: exceeding it fails the run with a message
-naming the artifact. For genuinely large output, write to object storage from
-the task and keep only a reference:
+`MaintenanceOnSteroids.max_artifact_size` (default 64 MB) rejects oversized
+persistent output and checks text/CSV appends before adding them to the buffer.
+It is not a process memory limit: arbitrary task allocations, nested JSON edits,
+serialization, and multiple artifacts can use more memory. Each collection
+checkpoint rewrites dirty artifacts, so keep them small. Write large output to
+object storage and keep only a reference:
 
 ```ruby
 def process(record)
@@ -674,10 +705,9 @@ after_complete do
 end
 ```
 
-Inline previews on the run page are separately capped (256 KB, or 200 top-level
-entries for JSON documents) so viewing a large artifact can't take down the web
-process. The full payload is still available via Download for file and CSV
-artifacts.
+Inline preview rendering is capped (256 KB, or 200 top-level JSON entries), but
+the database still returns complete payloads. Large or numerous artifacts can
+consume substantial web memory. File and CSV artifacts have a Download action.
 
 ### Pausing a long-running callable task
 

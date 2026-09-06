@@ -35,6 +35,7 @@ RSpec.describe MaintenanceOnSteroids::Generators::InstallGenerator do
     content = File.read(migration)
     expect(content).to include("create_table :maintenance_on_steroids_runs")
     expect(content).to include("create_table :maintenance_on_steroids_artifacts")
+    expect(content).to include("t.string  :execution_token")
     expect(content).to match(/ActiveRecord::Migration\[\d+\.\d+\]/)
   end
 

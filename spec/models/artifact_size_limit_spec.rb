@@ -44,3 +44,28 @@ RSpec.describe MaintenanceOnSteroids::Artifact, "size limit" do
     expect(build("text", data_text: "x" * 100_000)).to be_valid
   end
 end
+
+RSpec.describe "Artifact accumulator size checks" do
+  around do |example|
+    original = MaintenanceOnSteroids.max_artifact_size
+    MaintenanceOnSteroids.max_artifact_size = 4
+    example.run
+  ensure
+    MaintenanceOnSteroids.max_artifact_size = original
+  end
+
+  it "rejects text growth before modifying the buffer" do
+    record = MaintenanceOnSteroids::Artifact.new(name: "log", artifact_type: "text")
+    text = MaintenanceOnSteroids::TextArtifact.new(record)
+    text << "1234"
+    expect { text << "5" }.to raise_error(ActiveRecord::RecordInvalid, /max_artifact_size/)
+    expect(text.to_s).to eq("1234")
+  end
+
+  it "includes CSV quoting and newlines in its append limit" do
+    record = MaintenanceOnSteroids::Artifact.new(name: "report", artifact_type: "csv")
+    csv = MaintenanceOnSteroids::CsvArtifact.new(record)
+    expect { csv << ["a,b"] }.to raise_error(ActiveRecord::RecordInvalid, /max_artifact_size/)
+    expect(csv.rows).to be_empty
+  end
+end

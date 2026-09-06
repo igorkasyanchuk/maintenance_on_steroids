@@ -25,4 +25,4 @@ development:
 
 test:
   <<: *default
-  database: "<%= postgres ? 'maintenance_on_steroids_test' : ':memory:' %>"
+  database: "<%= ENV.fetch('MOS_TEST_DATABASE', postgres ? 'maintenance_on_steroids_test' : ':memory:') %>"

@@ -56,8 +56,7 @@ module MaintenanceOnSteroids
 
       begin
         run.enqueue!
-      rescue => e
-        run.update!(status: "errored", error_message: "Failed to enqueue: #{e.message}", completed_at: Time.current)
+      rescue MaintenanceOnSteroids::EnqueueFailed => e
         return redirect_to run_path(run), alert: "Run could not be enqueued: #{e.message}"
       end
 

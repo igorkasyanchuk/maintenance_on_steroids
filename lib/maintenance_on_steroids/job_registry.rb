@@ -18,20 +18,18 @@ module MaintenanceOnSteroids
 
       # Resolves a task class by name.
       #
-      # Only returns registered task classes (or, as a fallback for classes
-      # loaded outside app/maintenance, constants that are actual
-      # MaintenanceOnSteroids::Task subclasses). Returns nil for anything
-      # else so that user-supplied input can never resolve arbitrary
-      # constants (source disclosure / 500s) -- controllers 404 on nil.
+      # Only returns registered tasks or already-loaded Task descendants.
+      # Request and persisted names never trigger arbitrary constant loading.
       def find(class_name)
         load_all!
         class_name = class_name.to_s
         return registry[class_name] if registry.key?(class_name)
 
-        klass = class_name.safe_constantize
-        return nil unless klass.is_a?(Class) && klass < MaintenanceOnSteroids::Task
-
-        klass
+        # Never constantize request or persisted input. Descendants also cover
+        # tasks defined outside app/maintenance without loading arbitrary constants.
+        MaintenanceOnSteroids::Task.descendants.find do |klass|
+          klass.name == class_name && klass.name.safe_constantize.equal?(klass)
+        end
       end
 
       def load_all!

@@ -86,7 +86,7 @@ With interrupt paths:
 
 ### Cursor-Based Resumption
 
-Collection tasks track a `cursor` (last processed record ID) in the database. When a job is interrupted (Sidekiq restart, pause, etc.), it resumes from the cursor position — no records are reprocessed.
+Collection tasks commit accumulated artifacts and their `cursor` (last processed record ID) together. Resumption starts after the committed cursor. Side effects before an uncommitted checkpoint can repeat, so task processing must be idempotent. Workers claim runs with `execution_token`; reaping revokes ownership and resume replaces `active_job_id`.
 
 ### DSL Modules
 
@@ -101,7 +101,7 @@ Tasks are built using composable DSL blocks:
 
 Two styles (see README for detail):
 - **Explicit:** `artifacts.save(:name, value)` (alias `artifacts[:name] = value`) — persists immediately.
-- **Accumulator:** `artifacts.export << row` / `artifacts.result[k] = v` — mutate in memory; the job auto-flushes dirty buffers at completion and on pause/cancel.
+- **Accumulator:** `artifacts.export << row` / `artifacts.result[k] = v` — collection buffers commit with each record cursor; callable buffers flush at checkpoints and finalization. Flush failures surface as run errors.
 
 ### Instrumentation
 

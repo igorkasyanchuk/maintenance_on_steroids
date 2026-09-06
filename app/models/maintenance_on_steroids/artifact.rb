@@ -2,6 +2,24 @@ module MaintenanceOnSteroids
   class Artifact < ApplicationRecord
     belongs_to :run
 
+    attr_accessor :worker_token
+    around_save :guard_worker_write
+
+    def guard_worker_write(&block)
+      return yield unless worker_token
+
+      run.worker_token = worker_token
+      run.with_execution_lock(&block)
+    end
+
+    def check_buffer_size!(size)
+      limit = MaintenanceOnSteroids.max_artifact_size
+      return if limit.nil? || size <= limit
+
+      errors.add(:base, "artifact #{name.inspect} exceeds max_artifact_size (#{limit} bytes); use object storage for large outputs")
+      raise ActiveRecord::RecordInvalid, self
+    end
+
     validates :name, presence: true
     validates :kind, inclusion: { in: %w[input output] }
     validates :artifact_type, inclusion: { in: %w[jsonb blob text csv] }

@@ -26,11 +26,9 @@ module MaintenanceOnSteroids
   # Hard ceiling on a single stored artifact, in bytes.
   #
   # Artifacts are buffered in the worker's memory and stored in one database
-  # row, so this is a real limit, not a preference: without it a runaway export
-  # OOMs the worker or writes a payload the database has to TOAST. Exceeding it
-  # fails the run with a clear message instead. Raise it if you know your
-  # workers and database can take it; for genuine bulk export, write to object
-  # storage from the task and keep only a reference here.
+  # row. Save-time validation and text/CSV append checks reject oversized
+  # payloads, but this does not cap task allocations or aggregate process memory.
+  # For bulk export, write to object storage and keep only a reference here.
   mattr_accessor :max_artifact_size, default: 64 * 1024 * 1024
 
   # Proc to resolve the current user who triggered the run.
@@ -100,6 +98,9 @@ module MaintenanceOnSteroids
   # on purpose: controllers catch this and show the operator why, while any
   # other exception keeps propagating to the app's error reporting.
   class EnqueueFailed < StandardError; end
+
+  # The run was reaped or claimed by a newer execution. The old worker must stop.
+  class ExecutionLost < StandardError; end
 
   class << self
     def configure

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Require Rails 8.1.3.1 or newer within Rails 8, and add dependency auditing and
+  Brakeman to CI. Audit the host application's bundle as well.
+- Resolve task names only against loaded task subclasses, including in workers.
+
+### Fixed
+
+- Claim runs atomically and fence engine writes with a per-execution token.
+  Duplicate deliveries, paused runs and obsolete job IDs cannot restart work.
+  Stale workers cannot overwrite a resumed run's progress or artifacts.
+- Detect refused queue submissions and Continuable retries. Prepare resume
+  metadata before dispatch so fast workers retain their new results and errors.
+- Commit collection accumulator output and its cursor together. Flush final
+  output before committing completion; persistence failures now error the run.
+- Refresh callable heartbeats at checkpoints. Add optional `enqueued_threshold:`
+  to stale-run recovery for abandoned dispatches.
+- Check text/CSV append sizes before growing their buffers. Clarify at-least-once
+  side effects, callable restart behavior and artifact memory limits.
+
+- Completion, pause and cancel callbacks produce output before the final status
+  is committed. Flush failures raise from `ArtifactsProxy#flush!` after attempting
+  the remaining artifacts. Keep artifacts small: collection checkpoints now
+  persist dirty output after every record.
+
 ## [0.2.0] - 2026-08-24
 
 First version published to RubyGems. The 0.1.1 and 0.1.0 entries below are

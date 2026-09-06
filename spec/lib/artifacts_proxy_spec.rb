@@ -135,7 +135,7 @@ RSpec.describe MaintenanceOnSteroids::ArtifactsProxy do
       # First flushed artifact blows up on save!; the second must still persist.
       allow(proxy[:result]).to receive(:save!).and_raise(ActiveRecord::RecordInvalid)
 
-      expect { proxy.flush! }.not_to raise_error
+      expect { proxy.flush! }.to raise_error(ActiveRecord::RecordInvalid)
       expect(run.artifacts.find_by(name: "summary").data_text).to eq("hello")
     end
 

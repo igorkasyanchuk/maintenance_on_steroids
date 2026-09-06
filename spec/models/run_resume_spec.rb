@@ -24,12 +24,12 @@ RSpec.describe MaintenanceOnSteroids::Run, "#resume!" do
       run = described_class.create!(task_class: "VanishedTask", status: "paused", params: {})
 
       expect { run.resume! }
-        .to raise_error(MaintenanceOnSteroids::EnqueueFailed, /uninitialized constant VanishedTask/)
+        .to raise_error(MaintenanceOnSteroids::EnqueueFailed, /Unknown maintenance task: VanishedTask/)
 
       run.reload
       expect(run.status).to eq("errored")
       expect(run.error_message).to match(/Failed to enqueue/)
-      expect(run.active_job_id).to be_nil
+      expect(run.active_job_id).to be_present
     end
 
     it "keeps the original failure that errored the run" do
@@ -66,5 +66,49 @@ RSpec.describe MaintenanceOnSteroids::Run, "#resume!" do
     expect(run.error_message).to be_nil
     expect(run.error_backtrace).to be_nil
     expect(run.completed_at).to be_nil
+  end
+end
+
+RSpec.describe MaintenanceOnSteroids::Run, "dispatch safety" do
+  it "detects ActiveJob's false return on adapter enqueue errors" do
+    run = described_class.create!(task_class: "SimpleCallableTask", status: "errored", error_backtrace: "original failure")
+    allow(MaintenanceOnSteroids::RunJob.queue_adapter).to receive(:enqueue)
+      .and_raise(ActiveJob::EnqueueError, "queue unavailable")
+    expect { run.resume! }.to raise_error(MaintenanceOnSteroids::EnqueueFailed, "queue unavailable")
+    expect(run.reload.status).to eq("errored")
+    expect(run.error_message).to include("queue unavailable")
+    expect(run.error_backtrace).to eq("original failure")
+  end
+
+  it "detects an aborted enqueue callback" do
+    run = described_class.create!(task_class: "SimpleCallableTask", status: "paused")
+    callback = -> { throw :abort }
+    MaintenanceOnSteroids::RunJob.set_callback(:enqueue, :before, callback)
+    expect { run.resume! }.to raise_error(MaintenanceOnSteroids::EnqueueFailed, /callback aborted/)
+    expect(run.reload.status).to eq("errored")
+  ensure
+    MaintenanceOnSteroids::RunJob.skip_callback(:enqueue, :before, callback)
+  end
+
+  it "preserves the result when an inline worker finishes before enqueue returns" do
+    run = described_class.create!(task_class: "SimpleCallableTask", status: "paused", error_message: "old error")
+    allow(MaintenanceOnSteroids::RunJob.queue_adapter).to receive(:enqueue) { |job| job.perform_now }
+    expect(run.resume!).to eq(true)
+    expect(run.reload.status).to eq("completed")
+    expect(run.completed_at).to be_present
+    expect(run.error_message).to be_nil
+  end
+
+  it "preserves a fast worker's fresh error instead of replacing it with an enqueue failure" do
+    stub_const("FastFailureTask", Class.new(MaintenanceOnSteroids::Task) do
+      def call; raise "new worker error"; end
+    end)
+    run = described_class.create!(task_class: "FastFailureTask", status: "paused", error_message: "old error")
+    allow(MaintenanceOnSteroids::RunJob.queue_adapter).to receive(:enqueue) { |job| job.perform_now }
+    expect { run.resume! }.to raise_error(MaintenanceOnSteroids::EnqueueFailed, "new worker error")
+    expect(run.reload.status).to eq("errored")
+    expect(run.error_message).to eq("new worker error")
+    expect(run.completed_at).to be_present
+    expect(run.error_backtrace).to include("run_resume_spec.rb")
   end
 end
