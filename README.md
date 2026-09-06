@@ -909,6 +909,10 @@ class MigrateUserProfiles < MaintenanceOnSteroids::Task
 end
 ```
 
+## Alternatives
+
+https://github.com/Shopify/maintenance_tasks - a gem from Shopify. This gem actually inspired me to build my version, because the gem from Shopify is missing many features I need.
+
 ## License
 
 MIT License. See [LICENSE.txt](LICENSE.txt).
