@@ -944,11 +944,7 @@ end
 Not a demo app: the gem runs on [igorkasyanchuk.com](https://igorkasyanchuk.com),
 mounted at `/maintenance` against the live site database.
 
-![Dashboard on igorkasyanchuk.com/maintenance](docs/production-dashboard.png)
-
 ![Run #2 with its jsonb artifact](docs/production-run.png)
-
-![Task source rendered from the deployed image](docs/production-source.png)
 
 ## Alternatives
 
