@@ -939,6 +939,67 @@ class MigrateUserProfiles < MaintenanceOnSteroids::Task
 end
 ```
 
+## In production
+
+Not a demo app: the gem runs on [igorkasyanchuk.com](https://igorkasyanchuk.com),
+mounted at `/maintenance` against the live site database.
+
+Access there reuses the site's existing admin login instead of adding a second
+one -- `/admin` sets `session[:admin]` after its password check, and
+`verify_access_proc` looks for that flag:
+
+```ruby
+MaintenanceOnSteroids.configure do |config|
+  config.verify_access_proc = ->(controller) { controller.request.session[:admin].present? }
+end
+```
+
+The task iterates every project, logs its title, and collects id/name pairs
+into a JSON artifact:
+
+```ruby
+class ListProjects < MaintenanceOnSteroids::Task
+  about do
+    title "List Projects"
+    description "Logs every project title and collects ids and names into a JSON artifact."
+  end
+
+  artifact :projects, type: :jsonb, default: {}, label: "Projects",
+           description: "Project id to name"
+
+  def collection
+    Project.all
+  end
+
+  def process(project)
+    sleep 1 # slow it down so the dashboard progress is watchable
+    Rails.logger.info "[ListProjects] #{project.id}: #{project.title}"
+    artifacts.projects[project.id.to_s] = project.title
+  end
+end
+```
+
+Run #2 on production: completed, 11s, 11/11 records, one `jsonb` artifact of 11
+entries (244 B) shown and downloadable on the run page:
+
+```json
+{
+  "1": "Rails DB",
+  "2": "any_login",
+  "3": "Rails Performance",
+  "4": "Active Storage Validations",
+  "5": "SQL View",
+  "6": "Rails Live Reload",
+  "7": "Rails Charts",
+  "8": "Talk to your App",
+  "9": "ActiveRecord + RETURNING SQL"
+}
+```
+
+The source viewer (`/maintenance/jobs/ListProjects/source`) renders that file
+straight from the deployed image, so what ran and what you read are the same
+thing.
+
 ## Alternatives
 
 https://github.com/Shopify/maintenance_tasks - a gem from Shopify. This gem actually inspired me to build my version, because the gem from Shopify is missing many features I need.
