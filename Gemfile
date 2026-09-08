@@ -15,6 +15,10 @@ end
 gem "rspec-rails"
 gem "puma"
 gem "csv"
+# json 3.0 dropped the positional options argument from JSON.parse, which
+# ActiveSupport::JSON.decode (activesupport 8.1.3.1) still passes -- every JSON
+# column read blows up with ArgumentError. Drop this once Rails ships a fix.
+gem "json", "< 3"
 gem "devise"
 gem "any_login"
 gem "bundler-audit", require: false
