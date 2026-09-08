@@ -939,7 +939,7 @@ class MigrateUserProfiles < MaintenanceOnSteroids::Task
 end
 ```
 
-## In production
+## Testing in production
 
 ![Dashboard on igorkasyanchuk.com/maintenance](docs/production-dashboard.png)
 
