@@ -941,9 +941,6 @@ end
 
 ## In production
 
-Not a demo app: the gem runs on [igorkasyanchuk.com](https://igorkasyanchuk.com),
-mounted at `/maintenance` against the live site database.
-
 ![Run #2 with its jsonb artifact](docs/production-run.png)
 
 ## Alternatives
